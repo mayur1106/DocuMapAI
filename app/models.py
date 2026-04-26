@@ -231,6 +231,58 @@ class TocEntryResponse(BaseModel):
     confidence: float = Field(ge=0.0, le=1.0, description="Heading detection confidence score.")
 
 
+class TocDryRunChangedPage(BaseModel):
+    change_type: str = Field(description="Type of change planned for the page.")
+    page_label: str = Field(description="Visible or inferred page label affected by the change.")
+    reason: str = Field(description="Why this page is included in the dry run.")
+    page_number: int | None = Field(default=None, description="Existing one-based page number when applicable.")
+    final_page_number: int | None = Field(default=None, description="Expected one-based page number after planned insertions.")
+    insert_before_page: int | None = Field(default=None, description="Original one-based page before which a new page would be inserted.")
+    revision_action: str = Field(description="Planned revision/date action for this page.")
+    lep_action: str = Field(default="not_evaluated", description="Expected LEP action for this page.")
+
+
+class TocDryRunLepAction(BaseModel):
+    page_label: str = Field(description="Page label evaluated against LEP rows.")
+    action: str = Field(description="Expected LEP action, such as update_row, insert_row, or manual_review.")
+    matched: bool = Field(description="Whether an existing LEP row was detected.")
+
+
+class TocDryRunLepReport(BaseModel):
+    detected: bool = Field(description="Whether LEP pages were detected.")
+    pages: list[int] = Field(description="One-based LEP page numbers.")
+    detected_row_count: int = Field(description="Number of label-like LEP rows detected.")
+    matched_change_count: int = Field(description="Changed pages with an existing LEP row.")
+    missing_change_count: int = Field(description="Changed pages that would need a new LEP row.")
+    overflow_risk: str = Field(description="Conservative overflow risk estimate for LEP insertions.")
+    actions: list[TocDryRunLepAction] = Field(description="Per-page LEP actions.")
+    notes: list[str] = Field(default_factory=list, description="LEP detection notes and caveats.")
+
+
+class TocRevisionDryRunResponse(BaseModel):
+    document_id: str = Field(description="Document ID.")
+    filename: str = Field(description="Original uploaded filename.")
+    page_count: int = Field(description="Original PDF page count.")
+    mode: str = Field(description="Predicted processing mode.")
+    safe_to_apply: bool = Field(description="Whether the dry run found enough structure to proceed.")
+    mutates_pdf: bool = Field(default=False, description="Always false for dry-run responses.")
+    revision: str | None = Field(default=None, description="Revision strategy that would be applied later.")
+    revision_date: str | None = Field(default=None, description="Revision date value that would be applied later.")
+    track_link_repair_revision: bool = Field(description="Whether annotation-only hyperlink repair should trigger revision/LEP entries.")
+    existing_global_toc_pages: list[int] = Field(description="Detected global TOC page numbers.")
+    existing_local_toc_pages: list[int] = Field(description="Detected chapter TOC page numbers.")
+    eicas_reference_pages: list[int] = Field(description="Detected EICAS reference page numbers.")
+    heading_source: str = Field(description="Heading source used for planning.")
+    heading_count: int = Field(description="Number of headings or MEL rows available for planning.")
+    inserted_page_count: int = Field(description="Number of TOC pages that would be inserted.")
+    changed_pages: list[TocDryRunChangedPage] = Field(description="Pages that would require revision/date and LEP consideration.")
+    annotation_only_pages: list[int] = Field(description="Pages where link annotations may be repaired without visible content changes.")
+    linkable_rows: int = Field(description="Rows that appear resolvable to link targets.")
+    unresolved_rows: int = Field(description="Rows that could not be resolved during dry run.")
+    lep: TocDryRunLepReport = Field(description="LEP impact report.")
+    warnings: list[str] = Field(default_factory=list, description="Dry-run warnings and manual review notes.")
+
+
 class XmlPageStats(BaseModel):
     page: int = Field(ge=1, description="One-based page number.")
     width: float = Field(description="Page width in PDF points.")

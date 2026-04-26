@@ -47,7 +47,12 @@ def generate_toc_task(document_id: str) -> dict:
         if global_toc_pages and not local_toc_pages:
             headings = extract_mel_table_headings(record.original_path)
             if headings and has_missing_section_toc_pattern(record.original_path, headings, settings):
-                result = write_pdf_with_section_tocs(record.original_path, output_path, headings, settings)
+                result = write_pdf_with_section_tocs(
+                    record.original_path,
+                    output_path,
+                    headings,
+                    settings,
+                )
                 toc_path = save_toc(document_id, headings, settings)
                 update_document_status(
                     document_id,
@@ -68,7 +73,11 @@ def generate_toc_task(document_id: str) -> dict:
                     status="success",
                     message=f"Completed section TOC insertion for {record.original_filename}.",
                     document=record,
-                    metadata={"mode": "inserted_section_tocs", "heading_count": result.heading_count},
+                    metadata={
+                        "mode": "inserted_section_tocs",
+                        "heading_count": result.heading_count,
+                        "revision_update": result.revision_update,
+                    },
                     settings=settings,
                 )
                 return {
@@ -78,7 +87,10 @@ def generate_toc_task(document_id: str) -> dict:
                 }
 
         if global_toc_pages or local_toc_pages:
-            result = hyperlink_existing_toc(record.original_path, output_path)
+            result = hyperlink_existing_toc(
+                record.original_path,
+                output_path,
+            )
             headings = _headings_from_existing_toc(result)
             toc_path = save_toc(document_id, headings, settings)
             update_document_status(
@@ -105,6 +117,7 @@ def generate_toc_task(document_id: str) -> dict:
                     "heading_count": len(headings),
                     "linked_rows": len(result.linked_rows),
                     "unresolved_rows": len(result.unresolved_rows),
+                    "revision_update": result.revision_update,
                 },
                 settings=settings,
             )
@@ -124,7 +137,12 @@ def generate_toc_task(document_id: str) -> dict:
         if not headings:
             raise ValueError("No reliable MEL table rows or headings were detected in this PDF.")
 
-        write_pdf_with_toc(record.original_path, output_path, headings, settings)
+        write_pdf_with_toc(
+            record.original_path,
+            output_path,
+            headings,
+            settings,
+        )
         toc_path = save_toc(document_id, headings, settings)
         update_document_status(
             document_id,
@@ -204,7 +222,10 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
 
     try:
         output_path = settings.output_dir / f"{document_id}_linked_toc.pdf"
-        result = hyperlink_existing_toc(record.original_path, output_path)
+        result = hyperlink_existing_toc(
+            record.original_path,
+            output_path,
+        )
         update_document_status(
             document_id,
             DocumentStatus.READY,
@@ -223,7 +244,11 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
             status="success",
             message=f"Completed existing TOC hyperlinking for {record.original_filename}.",
             document=record,
-            metadata={"linked_rows": len(result.linked_rows), "unresolved_rows": len(result.unresolved_rows)},
+            metadata={
+                "linked_rows": len(result.linked_rows),
+                "unresolved_rows": len(result.unresolved_rows),
+                "revision_update": result.revision_update,
+            },
             settings=settings,
         )
         return {

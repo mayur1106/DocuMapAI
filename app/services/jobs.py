@@ -14,7 +14,11 @@ from app.workers.tasks import generate_toc_task, hyperlink_existing_toc_task
 logger = get_logger(__name__)
 
 
-def enqueue_generation(document_id: str, background_tasks: BackgroundTasks, settings: Settings | None = None) -> GenerateResponse:
+def enqueue_generation(
+    document_id: str,
+    background_tasks: BackgroundTasks,
+    settings: Settings | None = None,
+) -> GenerateResponse:
     return _enqueue_task(
         document_id=document_id,
         task=generate_toc_task,
@@ -55,10 +59,10 @@ def _enqueue_task(
         redis = Redis.from_url(settings.redis_url)
         redis.ping()
         queue = Queue(settings.queue_name, connection=redis)
-        job = queue.enqueue(
-            task,
-            document_id,
-            job_timeout=settings.job_timeout_seconds,
+        job = queue.enqueue_call(
+            func=task,
+            args=(document_id,),
+            timeout=settings.job_timeout_seconds,
             result_ttl=86400,
             failure_ttl=86400,
         )

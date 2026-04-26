@@ -8,6 +8,7 @@ import fitz
 
 from app.config import get_settings
 from app.services.bookmark_namer import bookmark_title_for_page
+from app.services.revision_manager import RevisionPageChange, apply_revision_updates
 
 
 GLOBAL_TOC_RE = re.compile(r"\bTOC-\d+\b", re.IGNORECASE)
@@ -55,6 +56,7 @@ class ExistingTocLinkResult:
     reference_pages: list[int] = field(default_factory=list)
     linked_rows: list[ExistingTocRow] = field(default_factory=list)
     unresolved_rows: list[ExistingTocRow] = field(default_factory=list)
+    revision_update: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         linked_by_type = _count_by_type(self.linked_rows)
@@ -69,6 +71,7 @@ class ExistingTocLinkResult:
             "unresolved_by_type": unresolved_by_type,
             "linked_rows": [_row_to_dict(row) for row in self.linked_rows],
             "unresolved_rows": [_row_to_dict(row) for row in self.unresolved_rows],
+            "revision_update": self.revision_update,
         }
 
 
@@ -78,7 +81,14 @@ class OutlineRoot:
     page_number: int
 
 
-def hyperlink_existing_toc(source_pdf: Path, output_pdf: Path) -> ExistingTocLinkResult:
+def hyperlink_existing_toc(
+    source_pdf: Path,
+    output_pdf: Path,
+    *,
+    revision: str | None = None,
+    revision_date: str | None = None,
+    track_link_repair_revision: bool = False,
+) -> ExistingTocLinkResult:
     """Overlay internal links on an existing visible table of contents.
 
     The function preserves all original pages. It removes link annotations from
@@ -149,6 +159,14 @@ def hyperlink_existing_toc(source_pdf: Path, output_pdf: Path) -> ExistingTocLin
             )
 
         _repair_outline(document, linked_rows)
+        revision_update = {}
+        if track_link_repair_revision:
+            revision_update = apply_revision_updates(
+                document,
+                _revision_changes_for_linked_rows(document, linked_rows),
+                revision=revision,
+                revision_date=revision_date,
+            ).to_dict()
 
         if output_pdf.exists():
             output_pdf.unlink()
@@ -160,6 +178,7 @@ def hyperlink_existing_toc(source_pdf: Path, output_pdf: Path) -> ExistingTocLin
         reference_pages=reference_pages,
         linked_rows=linked_rows,
         unresolved_rows=unresolved_rows,
+        revision_update=revision_update,
     )
 
 
@@ -963,6 +982,27 @@ def _delete_overlapping_links(page: fitz.Page, rect: fitz.Rect) -> None:
         link_rect = fitz.Rect(link["from"])
         if link_rect.intersects(rect):
             page.delete_link(link)
+
+
+def _revision_changes_for_linked_rows(document: fitz.Document, rows: list[ExistingTocRow]) -> list[RevisionPageChange]:
+    changes: list[RevisionPageChange] = []
+    seen: set[int] = set()
+    for row in rows:
+        if row.page_index in seen:
+            continue
+        seen.add(row.page_index)
+        page = document[row.page_index]
+        label_text = f"{_top_region_text(page)} {_bottom_region_text(page)}"
+        labels = extract_reference_labels(label_text)
+        page_label = labels[0] if labels else f"PDF page {row.page_number}"
+        changes.append(
+            RevisionPageChange(
+                page_index=row.page_index,
+                page_label=page_label,
+                change_type="repair_link_annotations",
+            )
+        )
+    return changes
 
 
 def _count_by_type(rows: list[ExistingTocRow]) -> dict[str, int]:
