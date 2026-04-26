@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+.env
+data/uploads/*
+data/output/*
+data/documents.json
+data/jobs.json
+!data/uploads/.gitkeep
+!data/output/.gitkeep
+frontend/node_modules/
+frontend/dist/
+frontend/.env.local
