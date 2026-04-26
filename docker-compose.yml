@@ -18,9 +18,6 @@ services:
       - "${API_PORT:-8010}:8010"
     volumes:
       - ./data:/app/data
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
 
   worker:
@@ -40,9 +37,6 @@ services:
       TESSDATA_DIR: /usr/share/tesseract-ocr/5/tessdata
     volumes:
       - ./data:/app/data
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
 
   redis:
