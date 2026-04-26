@@ -18,6 +18,7 @@ from app.models import (
     GenerateResponse,
     StatusResponse,
     TocEntryResponse,
+    TocRevisionDryRunResponse,
     UploadResponse,
     XmlConversionResponse,
     XmlStatsResponse,
@@ -25,6 +26,7 @@ from app.models import (
 from app.services import jobs, storage
 from app.services.pdf_xml_parser import convert_pdf_to_xml, read_xml_preview
 from app.services.storage import PDFValidationError
+from app.services.toc_revision_dry_run import build_toc_revision_dry_run
 from app.utils.logger import configure_logging, get_logger
 
 
@@ -85,6 +87,7 @@ app.add_middleware(
         "http://127.0.0.1:5175",
         "http://localhost:4173",
         "http://127.0.0.1:4173",
+        "http://cmtdigi.com:5174"
     ],
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
@@ -250,6 +253,46 @@ def _page_count(pdf_path) -> int | None:
     except Exception:
         logger.warning("Unable to read page count for %s", pdf_path)
         return None
+
+
+@app.get(
+    "/dry-run/toc/{document_id}",
+    response_model=TocRevisionDryRunResponse,
+    tags=["TOC Generation"],
+    summary="Dry-run TOC revision and LEP impact",
+    description=(
+        "Analyzes the uploaded PDF and predicts what TOC, revision/date, hyperlink, and LEP updates "
+        "would be required. This endpoint is read-only: it does not modify the source PDF, generated "
+        "PDF, document record, jobs, activity log, or stored TOC JSON."
+    ),
+    response_description="Predicted TOC revision and LEP impact report.",
+    responses={
+        404: {"model": ErrorResponse, "description": "The document ID does not exist."},
+        409: {"model": ErrorResponse, "description": "The document belongs to a different workflow."},
+        500: {"model": ErrorResponse, "description": "The dry-run analysis failed."},
+    },
+)
+async def dry_run_toc_revision(
+    document_id: Annotated[str, Path(description="Document ID returned by the upload endpoint.")],
+) -> TocRevisionDryRunResponse:
+    try:
+        record = storage.get_document(document_id, settings)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Document not found.") from exc
+
+    if record.workflow != DocumentWorkflow.TOC:
+        raise HTTPException(status_code=409, detail="This file belongs to the PDF conversion workflow.")
+    if not record.original_path.exists():
+        raise HTTPException(status_code=404, detail="Original PDF file is not available.")
+
+    try:
+        return build_toc_revision_dry_run(
+            record,
+            settings=settings,
+        )
+    except Exception as exc:
+        logger.exception("Failed to build TOC revision dry run for document %s", document_id)
+        raise HTTPException(status_code=500, detail=f"Unable to build dry run: {exc}") from exc
 
 
 @app.post(

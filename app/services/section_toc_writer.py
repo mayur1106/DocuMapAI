@@ -19,6 +19,7 @@ from app.services.existing_toc_linker import (
     link_eicas_references,
     resolve_target_page,
 )
+from app.services.revision_manager import RevisionPageChange, apply_revision_updates
 
 
 ATA_RE = re.compile(r"\bATA\s*[-\u2013\u2014]?\s*(\d{2})\b", re.IGNORECASE)
@@ -56,6 +57,7 @@ class SectionTocResult:
     linked_global_rows: int = 0
     linked_eicas_rows: int = 0
     unresolved_eicas_rows: int = 0
+    revision_update: dict = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -67,6 +69,7 @@ class SectionTocResult:
             "linked_global_rows": self.linked_global_rows,
             "linked_eicas_rows": self.linked_eicas_rows,
             "unresolved_eicas_rows": self.unresolved_eicas_rows,
+            "revision_update": self.revision_update,
         }
 
 
@@ -85,6 +88,9 @@ def write_pdf_with_section_tocs(
     output_pdf: Path,
     headings: list[Heading],
     settings: Settings | None = None,
+    *,
+    revision: str | None = None,
+    revision_date: str | None = None,
 ) -> SectionTocResult:
     """Insert missing chapter TOC pages before each ATA section."""
 
@@ -106,11 +112,19 @@ def write_pdf_with_section_tocs(
                 document.fullcopy_page(insert_at + offset, to=insert_at + offset)
 
         inserted_page_indices: list[int] = []
+        revision_changes: list[RevisionPageChange] = []
         sections: list[dict] = []
+        chapter_toc_counts: dict[str, int] = {}
         for plan in plans:
             first_toc_page = _first_toc_final_page(plan, insertions)
             section_pages = list(range(first_toc_page, first_toc_page + plan.inserted_page_count))
             inserted_page_indices.extend(page - 1 for page in section_pages)
+            first_chapter_toc_number = chapter_toc_counts.get(plan.chapter, 0) + 1
+            toc_labels = [
+                f"TOC {plan.chapter}-{first_chapter_toc_number + page_offset}"
+                for page_offset in range(plan.inserted_page_count)
+            ]
+            chapter_toc_counts[plan.chapter] = first_chapter_toc_number + plan.inserted_page_count - 1
             sections.append(
                 {
                     "title": plan.title,
@@ -118,18 +132,28 @@ def write_pdf_with_section_tocs(
                     "source_start_page": plan.source_start_page,
                     "source_end_page": plan.source_end_page,
                     "toc_pages": section_pages,
+                    "toc_labels": toc_labels,
                     "entry_count": len(plan.headings),
                 }
             )
 
             for page_offset, page_headings in enumerate(plan.toc_pages):
+                page_label = toc_labels[page_offset]
                 _draw_section_toc_page(
                     page=document[first_toc_page - 1 + page_offset],
                     plan=plan,
                     page_headings=page_headings,
                     page_offset=page_offset,
+                    page_label=page_label,
                     insertions=insertions,
                     settings=settings,
+                )
+                revision_changes.append(
+                    RevisionPageChange(
+                        page_index=first_toc_page - 1 + page_offset,
+                        page_label=page_label,
+                        change_type="insert_section_toc_page",
+                    )
                 )
 
         _link_global_toc_rows(document, global_rows, plans, insertions)
@@ -138,6 +162,12 @@ def write_pdf_with_section_tocs(
             excluded_pages=inserted_page_indices,
         )
         document.set_toc(_build_outline(document, source_toc, plans, insertions))
+        revision_update = apply_revision_updates(
+            document,
+            revision_changes,
+            revision=revision,
+            revision_date=revision_date,
+        ).to_dict()
 
         if output_pdf.exists():
             output_pdf.unlink()
@@ -151,6 +181,7 @@ def write_pdf_with_section_tocs(
         linked_global_rows=len(global_rows),
         linked_eicas_rows=len(linked_eicas_rows),
         unresolved_eicas_rows=len(unresolved_eicas_rows),
+        revision_update=revision_update,
     )
 
 
@@ -281,10 +312,11 @@ def _draw_section_toc_page(
     plan: SectionTocPlan,
     page_headings: list[Heading],
     page_offset: int,
+    page_label: str,
     insertions: list[tuple[int, int]],
     settings: Settings,
 ) -> None:
-    _prepare_section_toc_template(page, plan, page_offset, settings)
+    _prepare_section_toc_template(page, plan, page_label, settings)
 
     width = page.rect.width
     right_x = width - settings.toc_margin_x
@@ -306,29 +338,16 @@ def _draw_section_toc_page(
         indent = max(0, heading.level - 1) * settings.toc_indent_per_level
         x = settings.toc_margin_x + indent
         font_size = max(settings.toc_entry_font_size - (heading.level - 1) * 0.25, 8.5)
+        font_name = "Helvetica-Bold" if heading.level == 1 else settings.toc_font
         page_number_text = str(target_page_number)
-        page_number_width = fitz.get_text_length(page_number_text, fontname=settings.toc_font, fontsize=font_size)
+        page_number_width = fitz.get_text_length(page_number_text, fontname=font_name, fontsize=font_size)
         max_title_width = max(60.0, right_x - x - page_number_width - 16)
-        display_title = _truncate_to_width(heading.title, max_title_width, settings.toc_font, font_size)
-        title_width = fitz.get_text_length(display_title, fontname=settings.toc_font, fontsize=font_size)
-        dots = _leader_dots(right_x - page_number_width - 8 - (x + title_width), settings.toc_font, font_size)
+        display_title = _truncate_to_width(heading.title, max_title_width, font_name, font_size)
+        title_width = fitz.get_text_length(display_title, fontname=font_name, fontsize=font_size)
+        dots = _leader_dots(right_x - page_number_width - 8 - (x + title_width), font_name, font_size)
 
-        page.insert_text((x, y), display_title, fontsize=font_size, fontname=settings.toc_font, color=(0, 0, 0))
-        if dots:
-            page.insert_text(
-                (x + title_width + 4, y),
-                dots,
-                fontsize=font_size,
-                fontname=settings.toc_font,
-                color=(0.45, 0.45, 0.45),
-            )
-        page.insert_text(
-            (right_x - page_number_width, y),
-            page_number_text,
-            fontsize=font_size,
-            fontname=settings.toc_font,
-            color=(0, 0, 0),
-        )
+        page.insert_text((x, y), display_title, fontsize=font_size, fontname=font_name, color=(0, 0, 0))
+        
         page.insert_link(
             {
                 "kind": fitz.LINK_GOTO,
@@ -343,7 +362,7 @@ def _draw_section_toc_page(
 def _prepare_section_toc_template(
     page: fitz.Page,
     plan: SectionTocPlan,
-    page_offset: int,
+    page_label: str,
     settings: Settings,
 ) -> None:
     for link in list(page.get_links()):
@@ -369,7 +388,7 @@ def _prepare_section_toc_template(
         text=fitz.PDF_REDACT_TEXT_REMOVE,
     )
 
-    footer_text = f"TOC {plan.chapter}-{page_offset + 1}"
+    footer_text = page_label
     footer_font_size = 10.0
     footer_width = fitz.get_text_length(footer_text, fontname=settings.toc_font, fontsize=footer_font_size)
     page.insert_text(

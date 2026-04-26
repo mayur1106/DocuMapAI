@@ -14,6 +14,7 @@ A FastAPI backend service that accepts a text-based PDF, detects headings from l
 - Add clickable internal links from TOC entries to target pages.
 - Add clickable links from EICAS MEL item references to matching MEL item pages.
 - Use OCR only for image-based EICAS pages when normal PDF text extraction cannot read the EICAS table.
+- Preview TOC, revision/date, and LEP impact with a read-only dry run before applying document changes.
 - Add PDF outline/sidebar bookmarks with `fitz.Document.set_toc()`.
 - Name sidebar bookmarks from destination page headers when available, for example `787_57_wings`.
 - Convert uploaded PDFs to layout-preserving XML with page, block, line, span, image, link, annotation, and font metadata.
@@ -180,7 +181,7 @@ FastAPI serves interactive Swagger documentation automatically:
 - ReDoc: `http://localhost:8000/redoc`
 - Raw OpenAPI schema: `http://localhost:8000/openapi.json`
 
-Use Swagger UI to upload a PDF, start TOC generation, poll job status, inspect TOC JSON, and download the generated PDF from the browser.
+Use Swagger UI to upload a PDF, preview dry-run TOC revision/LEP impact, start TOC generation, poll job status, inspect TOC JSON, and download the generated PDF from the browser.
 
 ## React Dashboard
 
@@ -239,11 +240,24 @@ curl -X POST http://localhost:8000/generate-toc/{document_id}
 
 - If the PDF already has visible TOC pages, the service preserves those pages and fixes their links.
 - If the PDF does not have visible TOC pages, the service creates new clickable TOC pages.
+- If generated TOC pages are added, the service automatically increments the current chapter revision and stamps the current month/year on those TOC page headers and LEP rows.
+
+Process with automatic revision/date updates:
+
+```bash
+curl -X POST http://localhost:8000/generate-toc/{document_id}
+```
 
 Hyperlink an already existing TOC without inserting new TOC pages:
 
 ```bash
 curl -X POST http://localhost:8000/hyperlink-existing-toc/{document_id}
+```
+
+Preview TOC, revision/date, and LEP impact without modifying the PDF:
+
+```bash
+curl http://localhost:8000/dry-run/toc/{document_id}
 ```
 
 Check job status:
@@ -314,6 +328,8 @@ ITEM + DESCRIPTION
 ```
 
 Those generated section TOC rows link to the exact MEL item row, and the sidebar bookmarks are rebuilt so each section root contains its generated item bookmarks.
+
+Changed TOC pages are stamped in the detected header revision/date cells. The service keeps the existing issue text, such as `Issue-V`, increments the current revision for that chapter, such as `Rev-3` to `Rev-4`, and uses the current month/year, such as `APR 2026`. Matching LEP rows are updated in place. If a new generated TOC page has no existing LEP row, the service adds it to available intentionally blank LEP pages, paginating across those pages when needed while keeping the signature/seal area untouched. If no safe LEP space is available, the job result reports the unplaced rows for manual review instead of rewriting dense LEP table content.
 
 Sidebar bookmark names are derived from the destination page header when the service can find all required parts:
 
