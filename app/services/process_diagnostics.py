@@ -167,11 +167,11 @@ def _write_preview_text(report_path: Path, summary: dict[str, Any], unresolved_r
     for key, value in summary.items():
         lines.append(f"{key}: {value}")
     lines.append("")
-    lines.append("Unresolved rows (first 20):")
+    lines.append("Unresolved rows:")
     if not unresolved_rows:
         lines.append("None")
     else:
-        for row in unresolved_rows[:20]:
+        for row in unresolved_rows:
             lines.append(
                 f"- toc_page={row.page_number}, toc_type={row.toc_type}, "
                 f"label={row.target_label or '-'}, reason={row.unresolved_reason or 'target_not_found'}"
