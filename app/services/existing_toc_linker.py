@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Callable
 
 import fitz
 
@@ -89,6 +90,7 @@ def hyperlink_existing_toc(
     revision: str | None = None,
     revision_date: str | None = None,
     track_link_repair_revision: bool = False,
+    progress_callback: Callable[[str], None] | None = None,
 ) -> ExistingTocLinkResult:
     """Overlay internal links on an existing visible table of contents.
 
@@ -142,6 +144,11 @@ def hyperlink_existing_toc(
 
             if row.target_page_index is None:
                 unresolved_rows.append(row)
+                if progress_callback is not None:
+                    progress_callback(
+                        f"unresolved_row: toc_page={row.page_number}, toc_type={row.toc_type}, "
+                        f"label={row.target_label or '-'}, reason={row.unresolved_reason or 'target_not_found'}"
+                    )
             else:
                 linked_rows.append(row)
 

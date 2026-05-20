@@ -45,6 +45,36 @@ def write_process_report(
     return report_path
 
 
+def initialize_process_stream(
+    *,
+    document_id: str,
+    output_dir: Path,
+    mode: str,
+    source_filename: str,
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    preview_path = output_dir / f"{document_id}_process.preview.txt"
+    timestamp = datetime.now(timezone.utc).isoformat()
+    lines = [
+        f"timestamp_utc: {timestamp}",
+        f"document_id: {document_id}",
+        f"source_filename: {source_filename}",
+        f"mode: {mode}",
+        "status: processing_started",
+        "",
+    ]
+    preview_path.write_text("\n".join(lines), encoding="utf-8")
+    return preview_path
+
+
+def append_process_stream_line(preview_path: Path, line: str) -> None:
+    if not line:
+        return
+    preview_path.parent.mkdir(parents=True, exist_ok=True)
+    with preview_path.open("a", encoding="utf-8") as handle:
+        handle.write(f"{line}\n")
+
+
 def summarize_heading_stats(headings: list[Heading]) -> dict[str, Any]:
     if not headings:
         return {

@@ -14,7 +14,13 @@ from app.services.heading_detector import detect_headings
 from app.services.mel_table_extractor import extract_mel_table_headings
 from app.services.pdf_parser import extract_lines
 from app.services.pdf_writer import write_pdf_with_toc
-from app.services.process_diagnostics import summarize_heading_stats, summarize_link_stats, write_process_report
+from app.services.process_diagnostics import (
+    append_process_stream_line,
+    initialize_process_stream,
+    summarize_heading_stats,
+    summarize_link_stats,
+    write_process_report,
+)
 from app.services.section_toc_writer import (
     has_missing_section_toc_pattern,
     write_pdf_with_section_tocs,
@@ -39,6 +45,12 @@ def generate_toc_task(document_id: str) -> dict:
         settings=settings,
     )
     logger.info("Processing TOC for document %s", document_id)
+    preview_stream_path = initialize_process_stream(
+        document_id=document_id,
+        output_dir=settings.output_dir,
+        mode="generate_toc",
+        source_filename=record.original_filename,
+    )
     start_report_path = write_process_report(
         document_id=document_id,
         output_dir=settings.output_dir,
@@ -51,10 +63,15 @@ def generate_toc_task(document_id: str) -> dict:
     try:
         output_path = settings.output_dir / f"{document_id}_with_toc.pdf"
         global_toc_pages, local_toc_pages = _existing_toc_pages(record.original_path)
+        append_process_stream_line(
+            preview_stream_path,
+            f"detected_toc_pages: global={len(global_toc_pages)}, local={len(local_toc_pages)}",
+        )
         headings: list[Heading] | None = None
 
         if global_toc_pages and not local_toc_pages:
             headings = extract_mel_table_headings(record.original_path)
+            append_process_stream_line(preview_stream_path, f"mel_table_headings: {len(headings)}")
             if headings and has_missing_section_toc_pattern(record.original_path, headings, settings):
                 result = write_pdf_with_section_tocs(
                     record.original_path,
@@ -76,6 +93,7 @@ def generate_toc_task(document_id: str) -> dict:
                     },
                 )
                 save_process_log(document_id, process_log_path, settings)
+                append_process_stream_line(preview_stream_path, "status: completed_section_toc_insertion")
                 update_document_status(
                     document_id,
                     DocumentStatus.READY,
@@ -114,6 +132,7 @@ def generate_toc_task(document_id: str) -> dict:
             result = hyperlink_existing_toc(
                 record.original_path,
                 output_path,
+                progress_callback=lambda message: append_process_stream_line(preview_stream_path, message),
             )
             headings = _headings_from_existing_toc(result)
             toc_path = save_toc(document_id, headings, settings)
@@ -126,6 +145,7 @@ def generate_toc_task(document_id: str) -> dict:
                 unresolved_rows=result.unresolved_rows,
             )
             save_process_log(document_id, process_log_path, settings)
+            append_process_stream_line(preview_stream_path, "status: completed_existing_toc_linking")
             update_document_status(
                 document_id,
                 DocumentStatus.READY,
@@ -164,11 +184,13 @@ def generate_toc_task(document_id: str) -> dict:
             }
 
         headings = headings if headings is not None else extract_mel_table_headings(record.original_path)
+        append_process_stream_line(preview_stream_path, f"mel_table_headings: {len(headings)}")
         mode = "generated_mel_table_toc"
         if not headings:
             lines = extract_lines(str(record.original_path))
             headings = detect_headings(lines, settings)
             mode = "generated_layout_toc"
+            append_process_stream_line(preview_stream_path, f"layout_headings: {len(headings)}")
         if not headings:
             raise ValueError("No reliable MEL table rows or headings were detected in this PDF.")
 
@@ -187,6 +209,7 @@ def generate_toc_task(document_id: str) -> dict:
             summary=summarize_heading_stats(headings),
         )
         save_process_log(document_id, process_log_path, settings)
+        append_process_stream_line(preview_stream_path, f"status: completed_{mode}")
         update_document_status(
             document_id,
             DocumentStatus.READY,
@@ -226,6 +249,7 @@ def generate_toc_task(document_id: str) -> dict:
         except Exception:
             logger.exception("Failed to write process log for failed TOC job %s", document_id)
         _mark_document_failed(document_id, exc, settings)
+        append_process_stream_line(preview_stream_path, f"status: failed, error: {exc}")
         log_activity(
             action="toc_processing_failed",
             status="error",
@@ -275,6 +299,12 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         settings=settings,
     )
     logger.info("Hyperlinking existing TOC for document %s", document_id)
+    preview_stream_path = initialize_process_stream(
+        document_id=document_id,
+        output_dir=settings.output_dir,
+        mode="hyperlink_existing_toc",
+        source_filename=record.original_filename,
+    )
     start_report_path = write_process_report(
         document_id=document_id,
         output_dir=settings.output_dir,
@@ -289,6 +319,7 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         result = hyperlink_existing_toc(
             record.original_path,
             output_path,
+            progress_callback=lambda message: append_process_stream_line(preview_stream_path, message),
         )
         process_log_path = write_process_report(
             document_id=document_id,
@@ -299,6 +330,7 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
             unresolved_rows=result.unresolved_rows,
         )
         save_process_log(document_id, process_log_path, settings)
+        append_process_stream_line(preview_stream_path, "status: completed_hyperlink_existing_toc")
         update_document_status(
             document_id,
             DocumentStatus.READY,
@@ -343,6 +375,7 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         except Exception:
             logger.exception("Failed to write process log for failed hyperlink job %s", document_id)
         _mark_document_failed(document_id, exc, settings)
+        append_process_stream_line(preview_stream_path, f"status: failed, error: {exc}")
         log_activity(
             action="hyperlink_processing_failed",
             status="error",
