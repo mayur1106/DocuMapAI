@@ -25,6 +25,7 @@ from app.models import (
 )
 from app.services import jobs, storage
 from app.services.pdf_xml_parser import convert_pdf_to_xml, read_xml_preview
+from app.services.process_diagnostics import read_process_report_preview
 from app.services.storage import PDFValidationError
 from app.services.toc_revision_dry_run import build_toc_revision_dry_run
 from app.utils.logger import configure_logging, get_logger
@@ -87,6 +88,7 @@ app.add_middleware(
         "http://127.0.0.1:5175",
         "http://localhost:4173",
         "http://127.0.0.1:4173",
+        "http://cmtdigi.com:5174",
     ],
     allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
     allow_credentials=True,
@@ -651,7 +653,7 @@ async def preview_process_log(
     if not record.process_log_path or not record.process_log_path.exists():
         raise HTTPException(status_code=404, detail="Process diagnostics log is not available.")
 
-    return PlainTextResponse(record.process_log_path.read_text(encoding="utf-8"), media_type="text/plain")
+    return PlainTextResponse(read_process_report_preview(record.process_log_path), media_type="text/plain")
 
 
 @app.get(
@@ -660,7 +662,7 @@ async def preview_process_log(
     summary="Download process diagnostics log",
     response_class=FileResponse,
     responses={
-        200: {"content": {"text/plain": {}}, "description": "Process diagnostics log."},
+        200: {"content": {"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": {}}, "description": "Process diagnostics report."},
         404: {"model": ErrorResponse, "description": "The document or process log was not found."},
     },
 )
@@ -675,7 +677,7 @@ async def download_process_log(
     if not record.process_log_path or not record.process_log_path.exists():
         raise HTTPException(status_code=404, detail="Process diagnostics log is not available.")
 
-    filename = _download_filename(record.original_filename, suffix="_process", extension=".log")
+    filename = _download_filename(record.original_filename, suffix="_process", extension=".xlsx")
     storage.log_activity(
         action="process_log_downloaded",
         status="success",
@@ -684,7 +686,11 @@ async def download_process_log(
         metadata={"download_filename": filename},
         settings=settings,
     )
-    return FileResponse(record.process_log_path, media_type="text/plain", filename=filename)
+    return FileResponse(
+        record.process_log_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=filename,
+    )
 
 
 def _download_filename(original_filename: str, *, suffix: str, extension: str) -> str:
