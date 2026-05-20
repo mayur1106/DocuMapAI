@@ -1,0 +1,9 @@
+name: Local Config
+version: 1.0.0
+schema: v1
+
+models:
+  - name: CodeLlama 7B
+    provider: ollama
+    model: codellama:7b
+    apiBase: http://cmtdigi.com:11434

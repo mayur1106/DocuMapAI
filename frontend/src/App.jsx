@@ -38,6 +38,8 @@ import {
   getActivityLogs,
   getDownloadUrl,
   getJobStatus,
+  getProcessLogDownloadUrl,
+  getProcessLogPreview,
   getToc,
   getXmlDownloadUrl,
   getXmlPreview,
@@ -68,6 +70,8 @@ function App() {
   const [tocSearch, setTocSearch] = useState("");
   const [xmlStats, setXmlStats] = useState(null);
   const [xmlPreview, setXmlPreview] = useState("");
+  const [processLogPreview, setProcessLogPreview] = useState("");
+  const [processLogLoading, setProcessLogLoading] = useState(false);
   const [xmlConverting, setXmlConverting] = useState(false);
   const [xmlConvertingId, setXmlConvertingId] = useState("");
   const [xmlDetailsLoading, setXmlDetailsLoading] = useState(false);
@@ -264,6 +268,14 @@ function App() {
   }, [selectedDocument?.id, selectedDocument?.has_xml]);
 
   useEffect(() => {
+    if (!selectedDocument?.has_process_log) {
+      setProcessLogPreview("");
+      return;
+    }
+    loadProcessLogPreview(selectedDocument.id);
+  }, [selectedDocument?.id, selectedDocument?.has_process_log]);
+
+  useEffect(() => {
     if (!activeJob?.job_id) return;
 
     let cancelled = false;
@@ -350,6 +362,18 @@ function App() {
       setXmlPreview("");
     } finally {
       setXmlDetailsLoading(false);
+    }
+  }
+
+  async function loadProcessLogPreview(documentId) {
+    try {
+      setProcessLogLoading(true);
+      const preview = await getProcessLogPreview(documentId);
+      setProcessLogPreview(preview || "");
+    } catch {
+      setProcessLogPreview("");
+    } finally {
+      setProcessLogLoading(false);
     }
   }
 
@@ -538,6 +562,12 @@ function App() {
                 startIndex={documentTable.startIndex}
                 statusFilter={documentStatusFilter}
                 totalPages={documentTable.totalPages}
+              />
+              <ProcessLogPanel
+                document={selectedDocument}
+                loading={processLogLoading}
+                preview={processLogPreview}
+                onRefresh={() => selectedDocument?.id && loadProcessLogPreview(selectedDocument.id)}
               />
             </section>
           </>
@@ -956,6 +986,17 @@ function DocumentCommandCenter({ document, activeJob, jobStatus, processing, onS
             <small>Final PDF</small>
           </span>
         </a>
+        <a
+          className={`command-button download-command ${document?.has_process_log ? "" : "disabled"}`}
+          href={document?.has_process_log ? getProcessLogDownloadUrl(document.id) : undefined}
+          aria-disabled={!document?.has_process_log}
+        >
+          <ClipboardList size={18} />
+          <span>
+            <strong>Process Log</strong>
+            <small>Failures and unresolved links</small>
+          </span>
+        </a>
       </div>
 
       {document?.error && (
@@ -966,6 +1007,27 @@ function DocumentCommandCenter({ document, activeJob, jobStatus, processing, onS
       )}
 
       <WorkflowStatus document={document} jobStatus={jobStatus} processing={processing} />
+    </section>
+  );
+}
+
+function ProcessLogPanel({ document, loading, preview, onRefresh }) {
+  return (
+    <section className="table-panel toc-panel" aria-labelledby="process-log-title">
+      <div className="panel-header compact">
+        <div>
+          <p className="eyebrow">Diagnostics</p>
+          <h2 id="process-log-title">Process Log</h2>
+        </div>
+        <button className="icon-button" type="button" onClick={onRefresh} title="Refresh process log" disabled={!document?.has_process_log}>
+          {loading ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+        </button>
+      </div>
+      {!document?.has_process_log ? (
+        <EmptyState icon={ClipboardList} title="No log yet" description="Run processing to generate diagnostics for unresolved links and failures." />
+      ) : (
+        <pre className="xml-preview">{loading ? "Loading process log..." : preview || "Process log is empty."}</pre>
+      )}
     </section>
   );
 }
@@ -1261,6 +1323,30 @@ function DocumentRowActions({ document, isActiveJob, processing, deleting, onPro
           data-tooltip="Download available after processing"
         >
           <ArrowDownToLine size={16} />
+        </button>
+      )}
+
+      {document.has_process_log ? (
+        <a
+          className="row-icon-action download"
+          href={getProcessLogDownloadUrl(document.id)}
+          title="Download process log"
+          aria-label="Download process log"
+          data-tooltip="Download process log"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <ClipboardList size={16} />
+        </a>
+      ) : (
+        <button
+          className="row-icon-action download"
+          type="button"
+          disabled
+          title="Process log available after processing"
+          aria-label="Process log available after processing"
+          data-tooltip="Process log available after processing"
+        >
+          <ClipboardList size={16} />
         </button>
       )}
 

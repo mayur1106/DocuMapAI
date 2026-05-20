@@ -129,6 +129,7 @@ def _section_token(text: str) -> str | None:
         return None
 
     words = re.findall(r"[A-Za-z0-9]+", section_text)
+    words = _clean_section_words(words)
     if not words:
         return None
 
@@ -146,9 +147,45 @@ def _normalize_fleet_token(text: str) -> str | None:
 
 def _slugify_section(text: str) -> str | None:
     words = re.findall(r"[A-Za-z0-9]+", text)
+    words = _clean_section_words(words)
     if not words:
         return None
     return "_".join(word.lower() for word in words[:8])
+
+
+def _clean_section_words(words: list[str]) -> list[str]:
+    """Drop OCR/header noise such as duplicated leading Roman numeral markers."""
+
+    if not words:
+        return words
+
+    cleaned = words[:]
+
+    # Some headers include leading chapter markers like "I I ..." or "II ...".
+    # Remove leading Roman-only tokens so bookmark slugs start from the real title.
+    while cleaned and _is_roman_token(cleaned[0]):
+        cleaned.pop(0)
+
+    # Also collapse duplicated single-letter Roman noise that can appear mid-phrase.
+    deduped: list[str] = []
+    for word in cleaned:
+        lower_word = word.lower()
+        if (
+            deduped
+            and lower_word in {"i", "v", "x"}
+            and deduped[-1].lower() == lower_word
+        ):
+            continue
+        deduped.append(word)
+
+    return deduped
+
+
+def _is_roman_token(word: str) -> bool:
+    upper_word = word.upper()
+    if len(upper_word) > 6:
+        return False
+    return bool(re.fullmatch(r"[IVXLCDM]+", upper_word))
 
 
 def _top_region_text(page: fitz.Page) -> str:

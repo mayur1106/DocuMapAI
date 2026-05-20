@@ -203,6 +203,7 @@ async def list_documents(
             updated_by="Worker" if record.output_path or record.xml_path else "System",
             has_output=bool(record.output_path and record.output_path.exists()),
             has_toc=bool(record.toc_path and record.toc_path.exists()),
+            has_process_log=bool(record.process_log_path and record.process_log_path.exists()),
             has_xml=bool(record.xml_path and record.xml_path.exists()),
             error=record.error,
         )
@@ -627,6 +628,63 @@ async def download(
         media_type="application/pdf",
         filename=filename,
     )
+
+
+@app.get(
+    "/process-log/{document_id}/preview",
+    response_class=PlainTextResponse,
+    tags=["TOC Generation", "Existing TOC Linking"],
+    summary="Preview process diagnostics log",
+    responses={
+        200: {"content": {"text/plain": {}}, "description": "Process diagnostics log preview."},
+        404: {"model": ErrorResponse, "description": "The document or process log was not found."},
+    },
+)
+async def preview_process_log(
+    document_id: Annotated[str, Path(description="Document ID returned by the upload endpoint.")],
+) -> PlainTextResponse:
+    try:
+        record = storage.get_document(document_id, settings)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Document not found.") from exc
+
+    if not record.process_log_path or not record.process_log_path.exists():
+        raise HTTPException(status_code=404, detail="Process diagnostics log is not available.")
+
+    return PlainTextResponse(record.process_log_path.read_text(encoding="utf-8"), media_type="text/plain")
+
+
+@app.get(
+    "/process-log/{document_id}",
+    tags=["TOC Generation", "Existing TOC Linking"],
+    summary="Download process diagnostics log",
+    response_class=FileResponse,
+    responses={
+        200: {"content": {"text/plain": {}}, "description": "Process diagnostics log."},
+        404: {"model": ErrorResponse, "description": "The document or process log was not found."},
+    },
+)
+async def download_process_log(
+    document_id: Annotated[str, Path(description="Document ID returned by the upload endpoint.")],
+) -> FileResponse:
+    try:
+        record = storage.get_document(document_id, settings)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Document not found.") from exc
+
+    if not record.process_log_path or not record.process_log_path.exists():
+        raise HTTPException(status_code=404, detail="Process diagnostics log is not available.")
+
+    filename = _download_filename(record.original_filename, suffix="_process", extension=".log")
+    storage.log_activity(
+        action="process_log_downloaded",
+        status="success",
+        message=f"Downloaded process diagnostics log for {record.original_filename} as {filename}.",
+        document=record,
+        metadata={"download_filename": filename},
+        settings=settings,
+    )
+    return FileResponse(record.process_log_path, media_type="text/plain", filename=filename)
 
 
 def _download_filename(original_filename: str, *, suffix: str, extension: str) -> str:
