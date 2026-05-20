@@ -127,7 +127,7 @@ def delete_document(document_id: str, settings: Settings | None = None) -> Docum
         raise KeyError(document_id)
 
     record = _document_from_data(data, settings)
-    for path in (record.original_path, record.output_path, record.toc_path, record.xml_path, record.xml_stats_path):
+    for path in (record.original_path, record.output_path, record.toc_path, record.process_log_path, record.xml_path, record.xml_stats_path):
         if path:
             path.unlink(missing_ok=True)
 
@@ -157,6 +157,7 @@ def update_document_status(
     *,
     output_path: Path | None = None,
     toc_path: Path | None = None,
+    process_log_path: Path | None = None,
     error: str | None = None,
     settings: Settings | None = None,
 ) -> DocumentRecord:
@@ -168,6 +169,8 @@ def update_document_status(
         record.output_path = output_path
     if toc_path is not None:
         record.toc_path = toc_path
+    if process_log_path is not None:
+        record.process_log_path = process_log_path
     upsert_document(record, settings)
     log_activity(
         action="document_status_updated",
@@ -206,6 +209,26 @@ def save_toc(document_id: str, headings: Iterable[Heading], settings: Settings |
             settings=settings,
         )
     return toc_path
+
+
+def save_process_log(
+    document_id: str,
+    log_path: Path,
+    settings: Settings | None = None,
+) -> DocumentRecord:
+    settings = settings or get_settings()
+    record = get_document(document_id, settings)
+    record.process_log_path = log_path
+    upsert_document(record, settings)
+    log_activity(
+        action="process_log_saved",
+        status="info",
+        message=f"Saved process diagnostics log for {record.original_filename}.",
+        document=record,
+        metadata={"path": str(log_path)},
+        settings=settings,
+    )
+    return record
 
 
 def save_xml_conversion(
@@ -383,6 +406,7 @@ def _normalize_document_paths(record: DocumentRecord, settings: Settings) -> Doc
     record.original_path = _resolve_path(record.original_path, settings.upload_dir, fallback_name=f"{record.id}.pdf")
     record.output_path = _resolve_path(record.output_path, settings.output_dir)
     record.toc_path = _resolve_path(record.toc_path, settings.output_dir)
+    record.process_log_path = _resolve_path(record.process_log_path, settings.output_dir)
     record.xml_path = _resolve_path(record.xml_path, settings.output_dir)
     record.xml_stats_path = _resolve_path(record.xml_stats_path, settings.output_dir)
     return record

@@ -88,8 +88,8 @@ def _extract_page_entries(page: fitz.Page, page_number: int) -> list[MelTableEnt
     lines = _word_lines(page)
     page_text = page.get_text("text")
     ata_chapter = _ata_chapter(page_text)
-    geometry = _find_table_geometry(lines, page.rect.width)
-    if ata_chapter is None or geometry is None:
+    geometry = _find_table_geometry(lines, page.rect.width, ata_chapter)
+    if geometry is None:
         return []
 
     entries: list[MelTableEntry] = []
@@ -141,7 +141,11 @@ def _extract_page_entries(page: fitz.Page, page_number: int) -> list[MelTableEnt
     return entries
 
 
-def _find_table_geometry(lines: list[dict[str, object]], page_width: float) -> TableGeometry | None:
+def _find_table_geometry(
+    lines: list[dict[str, object]],
+    page_width: float,
+    ata_chapter: str | None = None,
+) -> TableGeometry | None:
     all_words = [word for line in lines for word in line["words"]]
     item_words = [word for word in all_words if str(word[4]).strip().upper() == "ITEM"]
     description_words = [word for word in all_words if str(word[4]).strip().upper() == "DESCRIPTION"]
@@ -182,7 +186,51 @@ def _find_table_geometry(lines: list[dict[str, object]], page_width: float) -> T
             top_y=max(float(item_word[3]), float(description_word[3])) + 4.0,
         )
 
-    return None
+    return _fallback_table_geometry(lines, page_width, ata_chapter)
+
+
+def _fallback_table_geometry(
+    lines: list[dict[str, object]],
+    page_width: float,
+    ata_chapter: str | None,
+) -> TableGeometry | None:
+    label_words: list[tuple] = []
+    description_x_values: list[float] = []
+
+    for line in lines:
+        words = line["words"]
+        label = _first_item_label_word(words, ata_chapter)
+        if label is None:
+            continue
+        label_words.append(label)
+        label_x = float(label[0])
+        for word in words:
+            x0 = float(word[0])
+            token = normalize_label(str(word[4]).strip())
+            if x0 <= label_x + 36.0:
+                continue
+            if ITEM_LABEL_RE.fullmatch(token):
+                continue
+            description_x_values.append(x0)
+
+    if len(label_words) < 2:
+        return None
+
+    item_x = sorted(float(word[0]) for word in label_words)[len(label_words) // 2]
+    top_y = min(float(word[3]) for word in label_words) + 4.0
+    if description_x_values:
+        description_x = sorted(description_x_values)[len(description_x_values) // 2]
+    else:
+        description_x = item_x + 96.0
+
+    description_right = max(description_x + 70.0, min(description_x + 180.0, page_width * 0.52))
+    return TableGeometry(
+        item_left=max(0.0, item_x - 24.0),
+        item_right=max(item_x + 38.0, description_x - 8.0),
+        description_left=max(0.0, description_x - 8.0),
+        description_right=description_right,
+        top_y=max(80.0, top_y),
+    )
 
 
 def _word_lines(page: fitz.Page) -> list[dict[str, object]]:
@@ -212,14 +260,32 @@ def _ata_chapter(text: str) -> str | None:
     return match.group(1) if match else None
 
 
-def _item_label_from_line(words: list[tuple], geometry: TableGeometry, ata_chapter: str) -> str | None:
+def _item_label_from_line(
+    words: list[tuple],
+    geometry: TableGeometry,
+    ata_chapter: str | None,
+) -> str | None:
     for word in words:
         x0 = float(word[0])
         if x0 < geometry.item_left or x0 > geometry.item_right:
             continue
         label = normalize_label(str(word[4]).strip())
-        if ITEM_LABEL_RE.fullmatch(label) and label.startswith(f"{ata_chapter}-"):
+        if not ITEM_LABEL_RE.fullmatch(label):
+            continue
+        if ata_chapter and not label.startswith(f"{ata_chapter}-"):
+            continue
             return label
+    return None
+
+
+def _first_item_label_word(words: list[tuple], ata_chapter: str | None) -> tuple | None:
+    for word in words:
+        label = normalize_label(str(word[4]).strip())
+        if not ITEM_LABEL_RE.fullmatch(label):
+            continue
+        if ata_chapter and not label.startswith(f"{ata_chapter}-"):
+            continue
+        return word
     return None
 
 

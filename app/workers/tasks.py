@@ -14,11 +14,12 @@ from app.services.heading_detector import detect_headings
 from app.services.mel_table_extractor import extract_mel_table_headings
 from app.services.pdf_parser import extract_lines
 from app.services.pdf_writer import write_pdf_with_toc
+from app.services.process_diagnostics import summarize_heading_gaps, summarize_link_result, write_process_log
 from app.services.section_toc_writer import (
     has_missing_section_toc_pattern,
     write_pdf_with_section_tocs,
 )
-from app.services.storage import get_document, log_activity, save_toc, update_document_status
+from app.services.storage import get_document, log_activity, save_process_log, save_toc, update_document_status
 from app.services.toc_builder import flatten_toc
 from app.utils.logger import get_logger
 
@@ -54,11 +55,25 @@ def generate_toc_task(document_id: str) -> dict:
                     settings,
                 )
                 toc_path = save_toc(document_id, headings, settings)
+                process_log_path = write_process_log(
+                    document_id=document_id,
+                    output_dir=settings.output_dir,
+                    mode="inserted_section_tocs",
+                    source_filename=record.original_filename,
+                    lines=[
+                        *summarize_heading_gaps(headings),
+                        f"sections_inserted: {len(result.sections)}",
+                        f"linked_eicas_rows: {result.linked_eicas_rows}",
+                        f"unresolved_eicas_rows: {result.unresolved_eicas_rows}",
+                    ],
+                )
+                save_process_log(document_id, process_log_path, settings)
                 update_document_status(
                     document_id,
                     DocumentStatus.READY,
                     output_path=output_path,
                     toc_path=toc_path,
+                    process_log_path=process_log_path,
                     error=None,
                     settings=settings,
                 )
@@ -83,6 +98,7 @@ def generate_toc_task(document_id: str) -> dict:
                 return {
                     "document_id": document_id,
                     "mode": "inserted_section_tocs",
+                    "process_log_path": str(process_log_path),
                     **result.to_dict(),
                 }
 
@@ -93,11 +109,20 @@ def generate_toc_task(document_id: str) -> dict:
             )
             headings = _headings_from_existing_toc(result)
             toc_path = save_toc(document_id, headings, settings)
+            process_log_path = write_process_log(
+                document_id=document_id,
+                output_dir=settings.output_dir,
+                mode="linked_existing_toc",
+                source_filename=record.original_filename,
+                lines=summarize_link_result(result),
+            )
+            save_process_log(document_id, process_log_path, settings)
             update_document_status(
                 document_id,
                 DocumentStatus.READY,
                 output_path=output_path,
                 toc_path=toc_path,
+                process_log_path=process_log_path,
                 error=None,
                 settings=settings,
             )
@@ -125,6 +150,7 @@ def generate_toc_task(document_id: str) -> dict:
                 "document_id": document_id,
                 "mode": "linked_existing_toc",
                 "heading_count": len(headings),
+                "process_log_path": str(process_log_path),
                 **result.to_dict(),
             }
 
@@ -144,11 +170,20 @@ def generate_toc_task(document_id: str) -> dict:
             settings,
         )
         toc_path = save_toc(document_id, headings, settings)
+        process_log_path = write_process_log(
+            document_id=document_id,
+            output_dir=settings.output_dir,
+            mode=mode,
+            source_filename=record.original_filename,
+            lines=summarize_heading_gaps(headings),
+        )
+        save_process_log(document_id, process_log_path, settings)
         update_document_status(
             document_id,
             DocumentStatus.READY,
             output_path=output_path,
             toc_path=toc_path,
+            process_log_path=process_log_path,
             error=None,
             settings=settings,
         )
@@ -166,9 +201,21 @@ def generate_toc_task(document_id: str) -> dict:
             "mode": mode,
             "heading_count": len(headings),
             "output_path": str(output_path),
+            "process_log_path": str(process_log_path),
             "toc": flatten_toc(headings),
         }
     except Exception as exc:
+        try:
+            failure_log_path = write_process_log(
+                document_id=document_id,
+                output_dir=settings.output_dir,
+                mode="toc_processing_failed",
+                source_filename=record.original_filename,
+                lines=[f"error: {exc}"],
+            )
+            save_process_log(document_id, failure_log_path, settings)
+        except Exception:
+            logger.exception("Failed to write process log for failed TOC job %s", document_id)
         _mark_document_failed(document_id, exc, settings)
         log_activity(
             action="toc_processing_failed",
@@ -226,10 +273,19 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
             record.original_path,
             output_path,
         )
+        process_log_path = write_process_log(
+            document_id=document_id,
+            output_dir=settings.output_dir,
+            mode="hyperlink_existing_toc",
+            source_filename=record.original_filename,
+            lines=summarize_link_result(result),
+        )
+        save_process_log(document_id, process_log_path, settings)
         update_document_status(
             document_id,
             DocumentStatus.READY,
             output_path=output_path,
+            process_log_path=process_log_path,
             error=None,
             settings=settings,
         )
@@ -253,9 +309,21 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         )
         return {
             "document_id": document_id,
+            "process_log_path": str(process_log_path),
             **result.to_dict(),
         }
     except Exception as exc:
+        try:
+            failure_log_path = write_process_log(
+                document_id=document_id,
+                output_dir=settings.output_dir,
+                mode="hyperlink_existing_toc_failed",
+                source_filename=record.original_filename,
+                lines=[f"error: {exc}"],
+            )
+            save_process_log(document_id, failure_log_path, settings)
+        except Exception:
+            logger.exception("Failed to write process log for failed hyperlink job %s", document_id)
         _mark_document_failed(document_id, exc, settings)
         log_activity(
             action="hyperlink_processing_failed",

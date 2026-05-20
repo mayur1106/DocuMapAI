@@ -73,6 +73,7 @@ class DocumentRecord(BaseModel):
     workflow: DocumentWorkflow = DocumentWorkflow.TOC
     output_path: Path | None = None
     toc_path: Path | None = None
+    process_log_path: Path | None = None
     xml_path: Path | None = None
     xml_stats_path: Path | None = None
     status: DocumentStatus = DocumentStatus.UPLOADED
@@ -154,6 +155,7 @@ class DocumentResponse(BaseModel):
     updated_by: str = Field(default="System", description="Last updater label for dashboard display.")
     has_output: bool = Field(description="Whether a processed PDF is available for download.")
     has_toc: bool = Field(description="Whether TOC JSON is available.")
+    has_process_log: bool = Field(default=False, description="Whether process diagnostics log is available.")
     has_xml: bool = Field(default=False, description="Whether PDF-to-XML output is available.")
     error: str | None = Field(default=None, description="Failure details when processing fails.")
 

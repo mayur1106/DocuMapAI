@@ -93,4 +93,12 @@ export function getXmlDownloadUrl(documentId) {
   return `${API_BASE_URL}/xml/${documentId}/download`;
 }
 
+export function getProcessLogDownloadUrl(documentId) {
+  return `${API_BASE_URL}/process-log/${documentId}`;
+}
+
+export function getProcessLogPreview(documentId) {
+  return request(`/process-log/${documentId}/preview`);
+}
+
 export { API_BASE_URL };

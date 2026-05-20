@@ -771,6 +771,16 @@ def _lep_row_bounds(
     return y_top, y_bottom
 
 
+def _format_toc_label(label: str) -> str:
+    normalized = _normalize_label(label)
+    if normalized.startswith("TOC "):
+        return normalized
+    return f"TOC {normalized}"
+
+
+# -----------------------------
+# REPLACE THIS FUNCTION IN YOUR CODE
+# -----------------------------
 def _insert_missing_lep_rows_in_chapter_blocks(
     document: fitz.Document,
     lep_entries: list[_LepEntry],
@@ -778,6 +788,7 @@ def _insert_missing_lep_rows_in_chapter_blocks(
 ) -> tuple[_LepChapterInsertionResult, list[_ResolvedRevisionChange]]:
     missing_by_chapter: dict[str, list[_ResolvedRevisionChange]] = {}
     leftovers: list[_ResolvedRevisionChange] = []
+
     for change in missing:
         chapter = _chapter_from_label(change.change.page_label)
         if chapter is None:
@@ -802,21 +813,37 @@ def _insert_missing_lep_rows_in_chapter_blocks(
             leftovers.extend(chapter_changes)
             continue
 
+        # Sort existing rows
         slots = sorted(chapter_entries, key=lambda entry: _natural_label_key(entry.label))
+
+        # Existing rows
         original_rows = [
-            _LepOutputRow(label=entry.label, date_value=_date_text_from_entry(document, entry), revision_value=entry.revision_value)
+            _LepOutputRow(
+                label=entry.label,
+                date_value=_date_text_from_entry(document, entry),
+                revision_value=entry.revision_value,
+            )
             for entry in slots
         ]
+
+        # FIX: Proper TOC rows
         toc_rows = [
             _LepOutputRow(
-                label=change.change.page_label,
+                label=_format_toc_label(change.change.page_label),
                 date_value=change.stamp.date_value,
                 revision_value=change.stamp.revision_value,
                 is_new_toc_row=True,
             )
-            for change in sorted(chapter_changes, key=lambda item: _natural_label_key(item.change.page_label))
+            for change in sorted(
+                chapter_changes,
+                key=lambda item: _natural_label_key(item.change.page_label),
+            )
         ]
-        desired_rows = toc_rows + original_rows
+
+        # CRITICAL: prepend TOC rows
+        desired_rows = list(toc_rows)
+        desired_rows.extend(original_rows)
+
         rows_for_slots = desired_rows[: len(slots)]
         overflow_rows = desired_rows[len(slots) :]
 
@@ -827,6 +854,7 @@ def _insert_missing_lep_rows_in_chapter_blocks(
 
         added += sum(1 for row in rows_for_slots if row.is_new_toc_row)
         handled_labels.update(_normalize_label(row.label) for row in toc_rows)
+
         overflow_rows_for_blank_pages.extend(overflow_rows)
 
     result = _LepChapterInsertionResult(
@@ -835,7 +863,9 @@ def _insert_missing_lep_rows_in_chapter_blocks(
         handled_labels=handled_labels,
         overflow_rows=overflow_rows_for_blank_pages,
     )
+
     return result, leftovers
+
 
 
 def _date_text_from_entry(document: fitz.Document, entry: _LepEntry) -> str:

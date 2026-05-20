@@ -1,0 +1,6 @@
+test_derive_bookmark_title_strips_leading_roman_noise (app.tests.test_bookmark_namer.TestBookmarkNamer.test_derive_bookmark_title_strips_leading_roman_noise) ... ok
+
+----------------------------------------------------------------------
+Ran 1 test in 0.000s
+
+OK
