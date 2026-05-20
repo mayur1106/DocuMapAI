@@ -30,7 +30,7 @@ class Settings(BaseSettings):
     ocr_dpi: int = 220
     tessdata_dir: Path | None = None
 
-    max_upload_mb: int = 100
+    max_upload_mb: int = 500
     heading_confidence_threshold: float = 0.55
     numbered_heading_threshold: float = 0.45
 
