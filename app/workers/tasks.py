@@ -14,7 +14,7 @@ from app.services.heading_detector import detect_headings
 from app.services.mel_table_extractor import extract_mel_table_headings
 from app.services.pdf_parser import extract_lines
 from app.services.pdf_writer import write_pdf_with_toc
-from app.services.process_diagnostics import summarize_heading_gaps, summarize_link_result, write_process_log
+from app.services.process_diagnostics import summarize_heading_stats, summarize_link_stats, write_process_report
 from app.services.section_toc_writer import (
     has_missing_section_toc_pattern,
     write_pdf_with_section_tocs,
@@ -55,17 +55,17 @@ def generate_toc_task(document_id: str) -> dict:
                     settings,
                 )
                 toc_path = save_toc(document_id, headings, settings)
-                process_log_path = write_process_log(
+                process_log_path = write_process_report(
                     document_id=document_id,
                     output_dir=settings.output_dir,
                     mode="inserted_section_tocs",
                     source_filename=record.original_filename,
-                    lines=[
-                        *summarize_heading_gaps(headings),
-                        f"sections_inserted: {len(result.sections)}",
-                        f"linked_eicas_rows: {result.linked_eicas_rows}",
-                        f"unresolved_eicas_rows: {result.unresolved_eicas_rows}",
-                    ],
+                    summary={
+                        **summarize_heading_stats(headings),
+                        "sections_inserted": len(result.sections),
+                        "linked_eicas_rows": result.linked_eicas_rows,
+                        "unresolved_eicas_rows": result.unresolved_eicas_rows,
+                    },
                 )
                 save_process_log(document_id, process_log_path, settings)
                 update_document_status(
@@ -109,12 +109,13 @@ def generate_toc_task(document_id: str) -> dict:
             )
             headings = _headings_from_existing_toc(result)
             toc_path = save_toc(document_id, headings, settings)
-            process_log_path = write_process_log(
+            process_log_path = write_process_report(
                 document_id=document_id,
                 output_dir=settings.output_dir,
                 mode="linked_existing_toc",
                 source_filename=record.original_filename,
-                lines=summarize_link_result(result),
+                summary=summarize_link_stats(result),
+                unresolved_rows=result.unresolved_rows,
             )
             save_process_log(document_id, process_log_path, settings)
             update_document_status(
@@ -170,12 +171,12 @@ def generate_toc_task(document_id: str) -> dict:
             settings,
         )
         toc_path = save_toc(document_id, headings, settings)
-        process_log_path = write_process_log(
+        process_log_path = write_process_report(
             document_id=document_id,
             output_dir=settings.output_dir,
             mode=mode,
             source_filename=record.original_filename,
-            lines=summarize_heading_gaps(headings),
+            summary=summarize_heading_stats(headings),
         )
         save_process_log(document_id, process_log_path, settings)
         update_document_status(
@@ -206,12 +207,12 @@ def generate_toc_task(document_id: str) -> dict:
         }
     except Exception as exc:
         try:
-            failure_log_path = write_process_log(
+            failure_log_path = write_process_report(
                 document_id=document_id,
                 output_dir=settings.output_dir,
                 mode="toc_processing_failed",
                 source_filename=record.original_filename,
-                lines=[f"error: {exc}"],
+                summary={"error": str(exc)},
             )
             save_process_log(document_id, failure_log_path, settings)
         except Exception:
@@ -273,12 +274,13 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
             record.original_path,
             output_path,
         )
-        process_log_path = write_process_log(
+        process_log_path = write_process_report(
             document_id=document_id,
             output_dir=settings.output_dir,
             mode="hyperlink_existing_toc",
             source_filename=record.original_filename,
-            lines=summarize_link_result(result),
+            summary=summarize_link_stats(result),
+            unresolved_rows=result.unresolved_rows,
         )
         save_process_log(document_id, process_log_path, settings)
         update_document_status(
@@ -314,12 +316,12 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         }
     except Exception as exc:
         try:
-            failure_log_path = write_process_log(
+            failure_log_path = write_process_report(
                 document_id=document_id,
                 output_dir=settings.output_dir,
                 mode="hyperlink_existing_toc_failed",
                 source_filename=record.original_filename,
-                lines=[f"error: {exc}"],
+                summary={"error": str(exc)},
             )
             save_process_log(document_id, failure_log_path, settings)
         except Exception:
