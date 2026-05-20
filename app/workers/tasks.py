@@ -39,6 +39,14 @@ def generate_toc_task(document_id: str) -> dict:
         settings=settings,
     )
     logger.info("Processing TOC for document %s", document_id)
+    start_report_path = write_process_report(
+        document_id=document_id,
+        output_dir=settings.output_dir,
+        mode="toc_processing_started",
+        source_filename=record.original_filename,
+        summary={"status": "processing_started"},
+    )
+    save_process_log(document_id, start_report_path, settings)
 
     try:
         output_path = settings.output_dir / f"{document_id}_with_toc.pdf"
@@ -267,6 +275,14 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         settings=settings,
     )
     logger.info("Hyperlinking existing TOC for document %s", document_id)
+    start_report_path = write_process_report(
+        document_id=document_id,
+        output_dir=settings.output_dir,
+        mode="hyperlink_processing_started",
+        source_filename=record.original_filename,
+        summary={"status": "processing_started"},
+    )
+    save_process_log(document_id, start_report_path, settings)
 
     try:
         output_path = settings.output_dir / f"{document_id}_linked_toc.pdf"

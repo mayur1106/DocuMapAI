@@ -70,7 +70,7 @@ function App() {
   const [tocSearch, setTocSearch] = useState("");
   const [xmlStats, setXmlStats] = useState(null);
   const [xmlPreview, setXmlPreview] = useState("");
-  const [processLogPreview, setProcessLogPreview] = useState("");
+  const [processLogLines, setProcessLogLines] = useState([]);
   const [processLogLoading, setProcessLogLoading] = useState(false);
   const [xmlConverting, setXmlConverting] = useState(false);
   const [xmlConvertingId, setXmlConvertingId] = useState("");
@@ -102,6 +102,7 @@ function App() {
   const fileInputRef = useRef(null);
   const diagnosticsPanelRef = useRef(null);
   const diagnosticsLogRef = useRef(null);
+  const seenProcessLogLinesRef = useRef(new Set());
 
   const tocDocuments = useMemo(() => documents.filter((document) => workflowForDocument(document) === WORKFLOWS.TOC), [documents]);
   const xmlDocuments = useMemo(() => documents.filter((document) => workflowForDocument(document) === WORKFLOWS.XML), [documents]);
@@ -272,10 +273,11 @@ function App() {
 
   useEffect(() => {
     if (!selectedDocument?.has_process_log) {
-      setProcessLogPreview("");
+      setProcessLogLines([]);
+      seenProcessLogLinesRef.current = new Set();
       return;
     }
-    loadProcessLogPreview(selectedDocument.id);
+    loadProcessLogPreview(selectedDocument.id, { appendOnly: false });
   }, [selectedDocument?.id, selectedDocument?.has_process_log]);
 
   useEffect(() => {
@@ -314,6 +316,8 @@ function App() {
 
   useEffect(() => {
     if (!activeJob?.job_id || activeView !== "toc") return;
+    setProcessLogLines([]);
+    seenProcessLogLinesRef.current = new Set();
     diagnosticsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [activeJob?.job_id, activeView]);
 
@@ -325,7 +329,7 @@ function App() {
     let cancelled = false;
     const pollLogs = async () => {
       if (cancelled) return;
-      await loadProcessLogPreview(activeJob.document_id);
+      await loadProcessLogPreview(activeJob.document_id, { appendOnly: true });
     };
     pollLogs();
     const timer = window.setInterval(pollLogs, 1500);
@@ -341,7 +345,7 @@ function App() {
     const el = diagnosticsLogRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [processLogPreview, activeJob?.job_id, diagnosticsAutoScroll]);
+  }, [processLogLines, activeJob?.job_id, diagnosticsAutoScroll]);
 
   async function loadActivityLogs() {
     try {
@@ -399,13 +403,39 @@ function App() {
     }
   }
 
-  async function loadProcessLogPreview(documentId) {
+  async function loadProcessLogPreview(documentId, { appendOnly = false } = {}) {
     try {
       setProcessLogLoading(true);
       const preview = await getProcessLogPreview(documentId);
-      setProcessLogPreview(preview || "");
+      const incomingLines = (preview || "").split(/\r?\n/).map((line) => line.trimEnd());
+      if (!appendOnly) {
+        const deduped = [];
+        const seen = new Set();
+        for (const line of incomingLines) {
+          if (!line || seen.has(line)) continue;
+          seen.add(line);
+          deduped.push(line);
+        }
+        seenProcessLogLinesRef.current = seen;
+        setProcessLogLines(deduped);
+        return;
+      }
+
+      const seen = seenProcessLogLinesRef.current;
+      const appended = [];
+      for (const line of incomingLines) {
+        if (!line || seen.has(line)) continue;
+        seen.add(line);
+        appended.push(line);
+      }
+      if (appended.length) {
+        setProcessLogLines((current) => [...current, ...appended]);
+      }
     } catch {
-      setProcessLogPreview("");
+      if (!appendOnly) {
+        setProcessLogLines([]);
+        seenProcessLogLinesRef.current = new Set();
+      }
     } finally {
       setProcessLogLoading(false);
     }
@@ -600,7 +630,7 @@ function App() {
               <ProcessLogPanel
                 document={selectedDocument}
                 loading={processLogLoading}
-                preview={processLogPreview}
+                preview={processLogLines.join("\n")}
                 processing={processing}
                 autoScroll={diagnosticsAutoScroll}
                 onToggleAutoScroll={() => setDiagnosticsAutoScroll((current) => !current)}
