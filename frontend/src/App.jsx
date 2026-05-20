@@ -98,7 +98,10 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [deletingId, setDeletingId] = useState("");
   const [notice, setNotice] = useState(null);
+  const [diagnosticsAutoScroll, setDiagnosticsAutoScroll] = useState(true);
   const fileInputRef = useRef(null);
+  const diagnosticsPanelRef = useRef(null);
+  const diagnosticsLogRef = useRef(null);
 
   const tocDocuments = useMemo(() => documents.filter((document) => workflowForDocument(document) === WORKFLOWS.TOC), [documents]);
   const xmlDocuments = useMemo(() => documents.filter((document) => workflowForDocument(document) === WORKFLOWS.XML), [documents]);
@@ -308,6 +311,37 @@ function App() {
       window.clearInterval(timer);
     };
   }, [activeJob?.job_id]);
+
+  useEffect(() => {
+    if (!activeJob?.job_id || activeView !== "toc") return;
+    diagnosticsPanelRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [activeJob?.job_id, activeView]);
+
+  useEffect(() => {
+    if (!activeJob?.job_id) return;
+    if (!activeJob?.document_id) return;
+    if (selectedDocument?.id !== activeJob.document_id) return;
+
+    let cancelled = false;
+    const pollLogs = async () => {
+      if (cancelled) return;
+      await loadProcessLogPreview(activeJob.document_id);
+    };
+    pollLogs();
+    const timer = window.setInterval(pollLogs, 1500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [activeJob?.job_id, activeJob?.document_id, selectedDocument?.id]);
+
+  useEffect(() => {
+    if (!activeJob?.job_id) return;
+    if (!diagnosticsAutoScroll) return;
+    const el = diagnosticsLogRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
+  }, [processLogPreview, activeJob?.job_id, diagnosticsAutoScroll]);
 
   async function loadActivityLogs() {
     try {
@@ -567,7 +601,12 @@ function App() {
                 document={selectedDocument}
                 loading={processLogLoading}
                 preview={processLogPreview}
+                processing={processing}
+                autoScroll={diagnosticsAutoScroll}
+                onToggleAutoScroll={() => setDiagnosticsAutoScroll((current) => !current)}
                 onRefresh={() => selectedDocument?.id && loadProcessLogPreview(selectedDocument.id)}
+                panelRef={diagnosticsPanelRef}
+                logRef={diagnosticsLogRef}
               />
             </section>
           </>
@@ -1011,22 +1050,45 @@ function DocumentCommandCenter({ document, activeJob, jobStatus, processing, onS
   );
 }
 
-function ProcessLogPanel({ document, loading, preview, onRefresh }) {
+function ProcessLogPanel({
+  document,
+  loading,
+  preview,
+  processing,
+  autoScroll,
+  onToggleAutoScroll,
+  onRefresh,
+  panelRef,
+  logRef,
+}) {
   return (
-    <section className="table-panel toc-panel" aria-labelledby="process-log-title">
+    <section className="table-panel toc-panel" aria-labelledby="process-log-title" ref={panelRef}>
       <div className="panel-header compact">
         <div>
           <p className="eyebrow">Diagnostics</p>
           <h2 id="process-log-title">Process Log</h2>
         </div>
-        <button className="icon-button" type="button" onClick={onRefresh} title="Refresh process log" disabled={!document?.has_process_log}>
-          {loading ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
-        </button>
+        <div className="panel-actions">
+          <button
+            className="icon-button"
+            type="button"
+            onClick={onToggleAutoScroll}
+            title={autoScroll ? "Pause auto-scroll" : "Resume auto-scroll"}
+            disabled={!document?.has_process_log}
+          >
+            {autoScroll ? "Pause Auto-Scroll" : "Resume Auto-Scroll"}
+          </button>
+          <button className="icon-button" type="button" onClick={onRefresh} title="Refresh process log" disabled={!document?.has_process_log}>
+            {loading ? <Loader2 className="spin" size={17} /> : <RefreshCw size={17} />}
+          </button>
+        </div>
       </div>
       {!document?.has_process_log ? (
         <EmptyState icon={ClipboardList} title="No log yet" description="Run processing to generate diagnostics for unresolved links and failures." />
       ) : (
-        <pre className="xml-preview">{loading ? "Loading process log..." : preview || "Process log is empty."}</pre>
+        <pre className={`xml-preview process-log-stream ${processing ? "streaming" : ""}`} ref={logRef}>
+          {loading ? "Loading process log..." : preview || "Process log is empty."}
+        </pre>
       )}
     </section>
   );

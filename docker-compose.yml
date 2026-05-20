@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile.backend
     container_name: pdf-toc-api
     environment:
-      REDIS_URL: redis://redis:6379/0
+      REDIS_URL: redis://cmtdigi.com:6379/0
       QUEUE_NAME: pdf-toc
       ALLOW_INLINE_FALLBACK: "false"
       EICAS_OCR_ENABLED: "true"
@@ -26,7 +26,7 @@ services:
       context: .
       dockerfile: Dockerfile.backend
     container_name: pdf-toc-worker
-    command: ["python", "-m", "app.workers.run_worker", "--url", "redis://redis:6379/0", "--queue", "pdf-toc"]
+    command: ["python", "-m", "app.workers.run_worker", "--url", "redis://cmtdigi.com:6379/0", "--queue", "pdf-toc"]
     environment:
       REDIS_URL: redis://cmtdigi.com:6379/0
       QUEUE_NAME: pdf-toc
