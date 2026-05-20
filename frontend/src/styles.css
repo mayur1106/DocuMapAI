@@ -1881,6 +1881,23 @@ button:disabled,
   line-height: 1.55;
 }
 
+.process-log-stream {
+  max-height: 360px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+}
+
+.process-log-stream.streaming {
+  border-color: #2f9e44;
+  box-shadow: 0 0 0 1px rgba(47, 158, 68, 0.3) inset;
+}
+
+.panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .xml-page-table {
   display: grid;
   max-height: 520px;
