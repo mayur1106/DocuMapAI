@@ -33,7 +33,14 @@ from app.utils.logger import get_logger
 logger = get_logger(__name__)
 
 
-def generate_toc_task(document_id: str) -> dict:
+def generate_toc_task(
+    document_id: str,
+    *,
+    track_link_repair_revision: bool | None = None,
+    revision: str | None = None,
+    revision_date: str | None = None,
+    **_: object,
+) -> dict:
     settings = get_settings()
     record = _get_document_for_worker(document_id, settings)
     update_document_status(document_id, DocumentStatus.PROCESSING, error=None, settings=settings)
@@ -78,6 +85,8 @@ def generate_toc_task(document_id: str) -> dict:
                     output_path,
                     headings,
                     settings,
+                    revision=revision,
+                    revision_date=revision_date,
                 )
                 toc_path = save_toc(document_id, headings, settings)
                 process_log_path = write_process_report(
@@ -199,6 +208,8 @@ def generate_toc_task(document_id: str) -> dict:
             output_path,
             headings,
             settings,
+            revision=revision,
+            revision_date=revision_date,
         )
         toc_path = save_toc(document_id, headings, settings)
         process_log_path = write_process_report(
@@ -287,7 +298,14 @@ def _headings_from_existing_toc(result: ExistingTocLinkResult) -> list[Heading]:
     return headings
 
 
-def hyperlink_existing_toc_task(document_id: str) -> dict:
+def hyperlink_existing_toc_task(
+    document_id: str,
+    *,
+    track_link_repair_revision: bool | None = None,
+    revision: str | None = None,
+    revision_date: str | None = None,
+    **_: object,
+) -> dict:
     settings = get_settings()
     record = _get_document_for_worker(document_id, settings)
     update_document_status(document_id, DocumentStatus.PROCESSING, error=None, settings=settings)
@@ -319,6 +337,9 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         result = hyperlink_existing_toc(
             record.original_path,
             output_path,
+            revision=revision,
+            revision_date=revision_date,
+            track_link_repair_revision=bool(track_link_repair_revision),
             progress_callback=lambda message: append_process_stream_line(preview_stream_path, message),
         )
         process_log_path = write_process_report(
