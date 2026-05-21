@@ -138,59 +138,66 @@ def generate_toc_task(
                 }
 
         if global_toc_pages or local_toc_pages:
-            result = hyperlink_existing_toc(
-                record.original_path,
-                output_path,
-                progress_callback=lambda message: append_process_stream_line(preview_stream_path, message),
-            )
-            headings = _headings_from_existing_toc(result)
-            toc_path = save_toc(document_id, headings, settings)
-            process_log_path = write_process_report(
-                document_id=document_id,
-                output_dir=settings.output_dir,
-                mode="linked_existing_toc",
-                source_filename=record.original_filename,
-                summary=summarize_link_stats(result),
-                unresolved_rows=result.unresolved_rows,
-            )
-            save_process_log(document_id, process_log_path, settings)
-            append_process_stream_line(preview_stream_path, "status: completed_existing_toc_linking")
-            update_document_status(
-                document_id,
-                DocumentStatus.READY,
-                output_path=output_path,
-                toc_path=toc_path,
-                process_log_path=process_log_path,
-                error=None,
-                settings=settings,
-            )
-            logger.info(
-                "Linked existing TOC for document %s with %d links and %d unresolved rows",
-                document_id,
-                len(result.linked_rows),
-                len(result.unresolved_rows),
-            )
-            log_activity(
-                action="toc_processing_completed",
-                status="success",
-                message=f"Completed existing TOC linking for {record.original_filename}.",
-                document=record,
-                metadata={
+            try:
+                result = hyperlink_existing_toc(
+                    record.original_path,
+                    output_path,
+                    progress_callback=lambda message: append_process_stream_line(preview_stream_path, message),
+                )
+                headings = _headings_from_existing_toc(result)
+                toc_path = save_toc(document_id, headings, settings)
+                process_log_path = write_process_report(
+                    document_id=document_id,
+                    output_dir=settings.output_dir,
+                    mode="linked_existing_toc",
+                    source_filename=record.original_filename,
+                    summary=summarize_link_stats(result),
+                    unresolved_rows=result.unresolved_rows,
+                )
+                save_process_log(document_id, process_log_path, settings)
+                append_process_stream_line(preview_stream_path, "status: completed_existing_toc_linking")
+                update_document_status(
+                    document_id,
+                    DocumentStatus.READY,
+                    output_path=output_path,
+                    toc_path=toc_path,
+                    process_log_path=process_log_path,
+                    error=None,
+                    settings=settings,
+                )
+                logger.info(
+                    "Linked existing TOC for document %s with %d links and %d unresolved rows",
+                    document_id,
+                    len(result.linked_rows),
+                    len(result.unresolved_rows),
+                )
+                log_activity(
+                    action="toc_processing_completed",
+                    status="success",
+                    message=f"Completed existing TOC linking for {record.original_filename}.",
+                    document=record,
+                    metadata={
+                        "mode": "linked_existing_toc",
+                        "heading_count": len(headings),
+                        "linked_rows": len(result.linked_rows),
+                        "unresolved_rows": len(result.unresolved_rows),
+                        "revision_update": result.revision_update,
+                    },
+                    settings=settings,
+                )
+                return {
+                    "document_id": document_id,
                     "mode": "linked_existing_toc",
                     "heading_count": len(headings),
-                    "linked_rows": len(result.linked_rows),
-                    "unresolved_rows": len(result.unresolved_rows),
-                    "revision_update": result.revision_update,
-                },
-                settings=settings,
-            )
-            return {
-                "document_id": document_id,
-                "mode": "linked_existing_toc",
-                "heading_count": len(headings),
-                "process_log_path": str(process_log_path),
-                **result.to_dict(),
-            }
+                    "process_log_path": str(process_log_path),
+                    **result.to_dict(),
+                }
+            except Exception as exc:
+                append_process_stream_line(
+                    preview_stream_path,
+                    f"existing_toc_linking_failed: {exc}; falling back to generated_toc",
+                )
+                logger.warning("Existing TOC linking failed for %s, falling back to generated TOC: %s", document_id, exc)
 
         headings = headings if headings is not None else extract_mel_table_headings(record.original_path)
         append_process_stream_line(preview_stream_path, f"mel_table_headings: {len(headings)}")
