@@ -21,10 +21,6 @@ from app.services.process_diagnostics import (
     summarize_link_stats,
     write_process_report,
 )
-from app.services.section_toc_writer import (
-    has_missing_section_toc_pattern,
-    write_pdf_with_section_tocs,
-)
 from app.services.storage import get_document, log_activity, save_process_log, save_toc, update_document_status
 from app.services.toc_builder import flatten_toc
 from app.utils.logger import get_logger
@@ -76,67 +72,7 @@ def generate_toc_task(
         )
         headings: list[Heading] | None = None
 
-        if global_toc_pages and not local_toc_pages:
-            headings = extract_mel_table_headings(record.original_path)
-            append_process_stream_line(preview_stream_path, f"mel_table_headings: {len(headings)}")
-            if headings and has_missing_section_toc_pattern(record.original_path, headings, settings):
-                result = write_pdf_with_section_tocs(
-                    record.original_path,
-                    output_path,
-                    headings,
-                    settings,
-                    revision=revision,
-                    revision_date=revision_date,
-                )
-                toc_path = save_toc(document_id, headings, settings)
-                process_log_path = write_process_report(
-                    document_id=document_id,
-                    output_dir=settings.output_dir,
-                    mode="inserted_section_tocs",
-                    source_filename=record.original_filename,
-                    summary={
-                        **summarize_heading_stats(headings),
-                        "sections_inserted": len(result.sections),
-                        "linked_eicas_rows": result.linked_eicas_rows,
-                        "unresolved_eicas_rows": result.unresolved_eicas_rows,
-                    },
-                )
-                save_process_log(document_id, process_log_path, settings)
-                append_process_stream_line(preview_stream_path, "status: completed_section_toc_insertion")
-                update_document_status(
-                    document_id,
-                    DocumentStatus.READY,
-                    output_path=output_path,
-                    toc_path=toc_path,
-                    process_log_path=process_log_path,
-                    error=None,
-                    settings=settings,
-                )
-                logger.info(
-                    "Inserted missing section TOCs for document %s with %d sections and %d entries",
-                    document_id,
-                    len(result.sections),
-                    result.heading_count,
-                )
-                log_activity(
-                    action="toc_processing_completed",
-                    status="success",
-                    message=f"Completed section TOC insertion for {record.original_filename}.",
-                    document=record,
-                    metadata={
-                        "mode": "inserted_section_tocs",
-                        "heading_count": result.heading_count,
-                        "revision_update": result.revision_update,
-                    },
-                    settings=settings,
-                )
-                return {
-                    "document_id": document_id,
-                    "mode": "inserted_section_tocs",
-                    "process_log_path": str(process_log_path),
-                    **result.to_dict(),
-                }
-
+        # Flow 1: Existing TOC pages present -> repair/add hyperlinks on existing TOC.
         if global_toc_pages or local_toc_pages:
             try:
                 result = hyperlink_existing_toc(
@@ -199,9 +135,10 @@ def generate_toc_task(
                 )
                 logger.warning("Existing TOC linking failed for %s, falling back to generated TOC: %s", document_id, exc)
 
+        # Flow 2: No TOC pages present (or linking failed) -> build new chapterwise TOC pages.
         headings = headings if headings is not None else extract_mel_table_headings(record.original_path)
         append_process_stream_line(preview_stream_path, f"mel_table_headings: {len(headings)}")
-        mode = "generated_mel_table_toc"
+        mode = "generated_chapterwise_mel_table_toc"
         if not headings:
             lines = extract_lines(str(record.original_path))
             headings = detect_headings(lines, settings)
