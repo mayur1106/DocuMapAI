@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import fitz
 
@@ -154,7 +155,8 @@ def _draw_toc_page(
 
         target_page_index = final_page_number - 1
         target_y = max(0.0, float(heading.y0 or 0.0))
-        page.insert_link(
+        _insert_link(
+            page,
             {
                 "kind": fitz.LINK_GOTO,
                 "from": fitz.Rect(settings.toc_margin_x, y - font_size, right_x, y + 3),
@@ -181,3 +183,10 @@ def _truncate_to_width(text: str, max_width: float, fontname: str, fontsize: flo
     while remaining and fitz.get_text_length(remaining + ellipsis, fontname=fontname, fontsize=fontsize) > max_width:
         remaining = remaining[:-1].rstrip()
     return remaining + ellipsis if remaining else ellipsis
+
+
+def _insert_link(page: fitz.Page, link: dict[str, Any]) -> None:
+    """Typed wrapper for PyMuPDF page.insert_link (missing in some type stubs)."""
+
+    page_obj: Any = page
+    page_obj.insert_link(link)

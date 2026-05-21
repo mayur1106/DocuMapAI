@@ -354,13 +354,6 @@ def _draw_section_toc_page(
                 fontname=settings.toc_font,
                 color=(0.45, 0.45, 0.45),
             )
-        page.insert_text(
-            (right_x - page_number_width, y),
-            page_number_text,
-            fontsize=font_size,
-            fontname=settings.toc_font,
-            color=(0, 0, 0),
-        )
         page.insert_link(
             {
                 "kind": fitz.LINK_GOTO,
