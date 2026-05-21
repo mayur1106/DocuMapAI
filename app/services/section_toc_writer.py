@@ -354,13 +354,6 @@ def _draw_section_toc_page(
                 fontname=settings.toc_font,
                 color=(0.45, 0.45, 0.45),
             )
-        page.insert_text(
-            (right_x - page_number_width, y),
-            page_number_text,
-            fontsize=font_size,
-            fontname=settings.toc_font,
-            color=(0, 0, 0),
-        )
         page.insert_link(
             {
                 "kind": fitz.LINK_GOTO,
@@ -519,6 +512,9 @@ def _paginate_section_toc_entries(
     footer_top_y: float,
     settings: Settings,
 ) -> list[list[Heading]]:
+    if not headings:
+        return []
+
     pages: list[list[Heading]] = [[]]
     y = _first_section_entry_y(body_start_y, 0)
     bottom_y = min(page_height - settings.toc_margin_bottom, footer_top_y - 12.0)
@@ -530,7 +526,7 @@ def _paginate_section_toc_entries(
         pages[-1].append(heading)
         y += settings.toc_line_height
 
-    return pages
+    return [page for page in pages if page]
 
 
 def _first_section_entry_y(body_start_y: float, page_offset: int) -> float:
