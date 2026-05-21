@@ -140,6 +140,7 @@ def _draw_toc_page(
         indent = max(0, heading.level - 1) * settings.toc_indent_per_level
         x = settings.toc_margin_x + indent
         font_size = max(settings.toc_entry_font_size - (heading.level - 1) * 0.25, 8.5)
+        # Keep row geometry identical to previous behavior; only hide visible page numbers.
         page_number_text = str(final_page_number)
         page_number_width = fitz.get_text_length(page_number_text, fontname=settings.toc_font, fontsize=font_size)
         max_title_width = max(60.0, right_x - x - page_number_width - 16)
@@ -150,7 +151,6 @@ def _draw_toc_page(
         page.insert_text((x, y), display_title, fontsize=font_size, fontname=settings.toc_font, color=(0, 0, 0))
         if dots:
             page.insert_text((x + title_width + 4, y), dots, fontsize=font_size, fontname=settings.toc_font, color=(0.45, 0.45, 0.45))
-        page.insert_text((right_x - page_number_width, y), page_number_text, fontsize=font_size, fontname=settings.toc_font, color=(0, 0, 0))
 
         target_page_index = final_page_number - 1
         target_y = max(0.0, float(heading.y0 or 0.0))
