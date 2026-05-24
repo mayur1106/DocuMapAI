@@ -20,10 +20,7 @@ class Settings(BaseSettings):
     upload_dir_name: str = "uploads"
     output_dir_name: str = "output"
 
-    redis_url: str = "redis://cmtdigi.com:6379/0"
-    queue_name: str = "pdf-toc"
     job_timeout_seconds: int = 600
-    allow_inline_fallback: bool = True
 
     eicas_ocr_enabled: bool = True
     ocr_language: str = "eng"

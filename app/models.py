@@ -167,7 +167,7 @@ class GenerateResponse(BaseModel):
                 "job_id": "f4f26f92e42b4237b47d4c723c8f2876",
                 "document_id": "8f6b13f4f9f6439f88a91642f9d3fb1d",
                 "status": "queued",
-                "backend": "rq",
+                "backend": "local",
             }
         }
     )
@@ -175,7 +175,7 @@ class GenerateResponse(BaseModel):
     job_id: str = Field(description="Background job ID used by the status endpoint.")
     document_id: str = Field(description="Document ID being processed.")
     status: str = Field(description="Initial job status.")
-    backend: str = Field(description="Job backend. Usually 'rq', or 'local' when Redis is unavailable.")
+    backend: str = Field(description="Job backend. Uses the built-in local Python queue worker.")
 
 
 class StatusResponse(BaseModel):
@@ -185,7 +185,7 @@ class StatusResponse(BaseModel):
                 "job_id": "f4f26f92e42b4237b47d4c723c8f2876",
                 "document_id": "8f6b13f4f9f6439f88a91642f9d3fb1d",
                 "status": "finished",
-                "backend": "rq",
+                "backend": "local",
                 "result": {
                     "document_id": "8f6b13f4f9f6439f88a91642f9d3fb1d",
                     "heading_count": 3,

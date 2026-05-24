@@ -55,6 +55,7 @@ const NAV_ITEMS = [
   { id: "toc", label: "TOC & Hyperlinking", icon: Activity },
   { id: "xml", label: "PDF to XML", icon: Database },
   { id: "activity", label: "Activity Logs", icon: ClipboardList },
+  { id: "activity", label: "Activity Logs", icon: ClipboardList },
 ];
 
 const WORKFLOWS = {

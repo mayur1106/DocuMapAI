@@ -359,7 +359,7 @@ def _get_document_for_worker(document_id: str, settings):
     except KeyError as exc:
         message = (
             f"Document {document_id} was not found in worker storage. "
-            "Ensure the API and worker containers mount the same /app/data volume and use the same Redis queue."
+            "Ensure the API container mounts the expected /app/data volume."
         )
         logger.error(message)
         raise FileNotFoundError(message) from exc
