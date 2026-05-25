@@ -14,6 +14,7 @@ from app.services.heading_detector import detect_headings
 from app.services.mel_table_extractor import extract_mel_table_headings
 from app.services.pdf_parser import extract_lines
 from app.services.pdf_writer import write_pdf_with_toc
+from app.services.section_toc_writer import write_pdf_with_section_tocs
 from app.services.process_diagnostics import (
     append_process_stream_line,
     initialize_process_stream,
@@ -72,8 +73,8 @@ def generate_toc_task(
         )
         headings: list[Heading] | None = None
 
-        # Flow 1: Existing TOC pages present -> repair/add hyperlinks on existing TOC.
-        if global_toc_pages or local_toc_pages:
+        # Flow 1: Both global and local TOC pages are present -> repair/add hyperlinks only.
+        if global_toc_pages and local_toc_pages:
             try:
                 result = hyperlink_existing_toc(
                     record.original_path,
@@ -135,17 +136,109 @@ def generate_toc_task(
                 )
                 logger.warning("Existing TOC linking failed for %s, falling back to generated TOC: %s", document_id, exc)
 
-        # Flow 2: No TOC pages present (or linking failed) -> build new chapterwise TOC pages.
-        headings = headings if headings is not None else extract_mel_table_headings(record.original_path)
-        append_process_stream_line(preview_stream_path, f"mel_table_headings: {len(headings)}")
-        mode = "generated_chapterwise_mel_table_toc"
-        if not headings:
-            lines = extract_lines(str(record.original_path))
-            headings = detect_headings(lines, settings)
-            mode = "generated_layout_toc"
-            append_process_stream_line(preview_stream_path, f"layout_headings: {len(headings)}")
-        if not headings:
-            raise ValueError("No reliable MEL table rows or headings were detected in this PDF.")
+        headings = headings if headings is not None else _extract_generation_headings(record.original_path, settings, preview_stream_path)
+
+        # Flow 2: Global TOC exists but local/chapter TOC pages are missing -> insert missing section TOCs.
+        if global_toc_pages and not local_toc_pages:
+            section_result = write_pdf_with_section_tocs(
+                record.original_path,
+                output_path,
+                headings,
+                settings,
+                revision=revision,
+                revision_date=revision_date,
+            )
+            toc_path = save_toc(document_id, headings, settings)
+            process_log_path = write_process_report(
+                document_id=document_id,
+                output_dir=settings.output_dir,
+                mode="inserted_missing_section_tocs",
+                source_filename=record.original_filename,
+                summary=summarize_heading_stats(headings),
+            )
+            save_process_log(document_id, process_log_path, settings)
+            append_process_stream_line(preview_stream_path, "status: completed_inserted_missing_section_tocs")
+            update_document_status(
+                document_id,
+                DocumentStatus.READY,
+                output_path=output_path,
+                toc_path=toc_path,
+                process_log_path=process_log_path,
+                error=None,
+                settings=settings,
+            )
+            log_activity(
+                action="toc_processing_completed",
+                status="success",
+                message=f"Completed inserted_missing_section_tocs for {record.original_filename}.",
+                document=record,
+                metadata={
+                    "mode": "inserted_missing_section_tocs",
+                    "heading_count": len(headings),
+                    "inserted_page_count": section_result.inserted_page_count,
+                    "section_count": len(section_result.sections),
+                    "output_path": str(output_path),
+                },
+                settings=settings,
+            )
+            return {
+                "document_id": document_id,
+                "mode": "inserted_missing_section_tocs",
+                "heading_count": len(headings),
+                "output_path": str(output_path),
+                "process_log_path": str(process_log_path),
+                **section_result.to_dict(),
+            }
+
+        # Flow 3: Local/chapter TOC exists but global TOC is missing -> generate missing global TOC.
+        if local_toc_pages and not global_toc_pages:
+            mode = "generated_missing_global_toc"
+            write_pdf_with_toc(
+                record.original_path,
+                output_path,
+                headings,
+                settings,
+                revision=revision,
+                revision_date=revision_date,
+            )
+            toc_path = save_toc(document_id, headings, settings)
+            process_log_path = write_process_report(
+                document_id=document_id,
+                output_dir=settings.output_dir,
+                mode=mode,
+                source_filename=record.original_filename,
+                summary=summarize_heading_stats(headings),
+            )
+            save_process_log(document_id, process_log_path, settings)
+            append_process_stream_line(preview_stream_path, f"status: completed_{mode}")
+            update_document_status(
+                document_id,
+                DocumentStatus.READY,
+                output_path=output_path,
+                toc_path=toc_path,
+                process_log_path=process_log_path,
+                error=None,
+                settings=settings,
+            )
+            log_activity(
+                action="toc_processing_completed",
+                status="success",
+                message=f"Completed {mode} for {record.original_filename}.",
+                document=record,
+                metadata={"mode": mode, "heading_count": len(headings), "output_path": str(output_path)},
+                settings=settings,
+            )
+            return {
+                "document_id": document_id,
+                "mode": mode,
+                "heading_count": len(headings),
+                "output_path": str(output_path),
+                "process_log_path": str(process_log_path),
+                "toc": flatten_toc(headings),
+            }
+
+        # Flow 4: No TOC pages present (or existing-link repair failed) -> generate TOC pages.
+        mode = "generated_chapterwise_mel_table_toc" if any(heading.source == "mel_table" for heading in headings) else "generated_layout_toc"
 
         write_pdf_with_toc(
             record.original_path,
@@ -240,6 +333,21 @@ def _headings_from_existing_toc(result: ExistingTocLinkResult) -> list[Heading]:
             )
         )
     return headings
+
+
+def _extract_generation_headings(pdf_path, settings, preview_stream_path) -> list[Heading]:
+    headings = extract_mel_table_headings(pdf_path)
+    append_process_stream_line(preview_stream_path, f"mel_table_headings: {len(headings)}")
+    if headings:
+        return headings
+
+    lines = extract_lines(str(pdf_path))
+    headings = detect_headings(lines, settings)
+    append_process_stream_line(preview_stream_path, f"layout_headings: {len(headings)}")
+    if headings:
+        return headings
+
+    raise ValueError("No reliable MEL table rows or headings were detected in this PDF.")
 
 
 def hyperlink_existing_toc_task(

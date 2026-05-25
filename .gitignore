@@ -10,5 +10,5 @@ data/jobs.json
 !data/uploads/.gitkeep
 !data/output/.gitkeep
 frontend/node_modules/
-frontend/dist/
+frontend
 frontend/.env.local
