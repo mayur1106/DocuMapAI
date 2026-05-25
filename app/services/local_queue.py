@@ -43,6 +43,18 @@ def enqueue(job_id: str, document_id: str, task: TaskCallable, task_name: str) -
     _TASK_QUEUE.put((job_id, document_id, task, task_name))
 
 
+def clear_pending() -> int:
+    cleared = 0
+    while True:
+        try:
+            _TASK_QUEUE.get_nowait()
+            _TASK_QUEUE.task_done()
+            cleared += 1
+        except queue.Empty:
+            break
+    return cleared
+
+
 def _worker_loop(*, settings: Settings) -> None:
     while True:
         job_id, document_id, task, task_name = _TASK_QUEUE.get()

@@ -117,6 +117,22 @@ async def list_activity(
 
 
 @app.post(
+    "/admin/queue/clear",
+    tags=["Activity"],
+    summary="Clear local queue jobs",
+    description="Clears pending in-memory local queue items and persisted local job records.",
+    response_description="Clear operation result.",
+)
+async def clear_local_queue() -> dict[str, int]:
+    pending_cleared = local_queue.clear_pending()
+    persisted_cleared = storage.clear_local_jobs(settings)
+    return {
+        "pending_cleared": pending_cleared,
+        "persisted_cleared": persisted_cleared,
+    }
+
+
+@app.post(
     "/upload",
     response_model=UploadResponse,
     tags=["Documents"],

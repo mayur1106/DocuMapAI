@@ -314,6 +314,21 @@ def update_local_job(
     return record
 
 
+def clear_local_jobs(settings: Settings | None = None) -> int:
+    settings = settings or get_settings()
+    jobs = _read_jobs(settings)
+    cleared = len(jobs)
+    _atomic_write_json(settings.jobs_index_path, {})
+    log_activity(
+        action="local_jobs_cleared",
+        status="warning",
+        message=f"Cleared {cleared} local job records.",
+        metadata={"cleared_jobs": cleared},
+        settings=settings,
+    )
+    return cleared
+
+
 def log_activity(
     *,
     action: str,
