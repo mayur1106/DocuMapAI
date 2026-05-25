@@ -9,7 +9,6 @@ from app.config import Settings, get_settings
 from app.models import Heading
 from app.services.bookmark_namer import bookmark_title_for_page
 from app.services.existing_toc_linker import link_eicas_references
-from app.services.revision_manager import RevisionPageChange, apply_revision_updates
 from app.services.toc_builder import paginate_toc_entries
 
 
@@ -51,11 +50,6 @@ def write_pdf_with_toc(
                 settings,
             )
 
-        revision_changes = [
-            RevisionPageChange(page_index=page_index, page_label=f"TOC-{page_index + 1}", change_type="insert_front_toc_page")
-            for page_index in range(toc_page_count)
-        ]
-
         bookmark_cache: dict[int, str] = {}
         outline = [
             [
@@ -72,12 +66,6 @@ def write_pdf_with_toc(
         ]
         document.set_toc(outline)
         link_eicas_references(document, excluded_pages=list(range(toc_page_count)))
-        apply_revision_updates(
-            document,
-            revision_changes,
-            revision=revision,
-            revision_date=revision_date,
-        )
 
         if output_pdf.exists():
             output_pdf.unlink()
@@ -140,17 +128,10 @@ def _draw_toc_page(
         indent = max(0, heading.level - 1) * settings.toc_indent_per_level
         x = settings.toc_margin_x + indent
         font_size = max(settings.toc_entry_font_size - (heading.level - 1) * 0.25, 8.5)
-        page_number_text = str(final_page_number)
-        page_number_width = fitz.get_text_length(page_number_text, fontname=settings.toc_font, fontsize=font_size)
-        max_title_width = max(60.0, right_x - x - page_number_width - 16)
+        max_title_width = max(60.0, right_x - x - 8)
         display_title = _truncate_to_width(heading.title, max_title_width, settings.toc_font, font_size)
-        title_width = fitz.get_text_length(display_title, fontname=settings.toc_font, fontsize=font_size)
-        dots = _leader_dots(right_x - page_number_width - 8 - (x + title_width), settings.toc_font, font_size)
 
         page.insert_text((x, y), display_title, fontsize=font_size, fontname=settings.toc_font, color=(0, 0, 0))
-        if dots:
-            page.insert_text((x + title_width + 4, y), dots, fontsize=font_size, fontname=settings.toc_font, color=(0.45, 0.45, 0.45))
-        page.insert_text((right_x - page_number_width, y), page_number_text, fontsize=font_size, fontname=settings.toc_font, color=(0, 0, 0))
 
         target_page_index = final_page_number - 1
         target_y = max(0.0, float(heading.y0 or 0.0))
@@ -163,14 +144,6 @@ def _draw_toc_page(
             }
         )
         y += settings.toc_line_height
-
-
-def _leader_dots(available_width: float, fontname: str, fontsize: float) -> str:
-    if available_width <= 8:
-        return ""
-    dot_width = max(fitz.get_text_length(".", fontname=fontname, fontsize=fontsize), 1.0)
-    count = int(available_width / dot_width)
-    return "." * max(0, count)
 
 
 def _truncate_to_width(text: str, max_width: float, fontname: str, fontsize: float) -> str:

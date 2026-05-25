@@ -19,7 +19,6 @@ from app.services.existing_toc_linker import (
     link_eicas_references,
     resolve_target_page,
 )
-from app.services.revision_manager import RevisionPageChange, apply_revision_updates
 
 
 ATA_RE = re.compile(r"\bATA\s*[-\u2013\u2014]?\s*(\d{2})\b", re.IGNORECASE)
@@ -112,7 +111,6 @@ def write_pdf_with_section_tocs(
                 document.fullcopy_page(insert_at + offset, to=insert_at + offset)
 
         inserted_page_indices: list[int] = []
-        revision_changes: list[RevisionPageChange] = []
         sections: list[dict] = []
         chapter_toc_counts: dict[str, int] = {}
         for plan in plans:
@@ -148,26 +146,13 @@ def write_pdf_with_section_tocs(
                     insertions=insertions,
                     settings=settings,
                 )
-                revision_changes.append(
-                    RevisionPageChange(
-                        page_index=first_toc_page - 1 + page_offset,
-                        page_label=page_label,
-                        change_type="insert_section_toc_page",
-                    )
-                )
-
         _link_global_toc_rows(document, global_rows, plans, insertions)
         linked_eicas_rows, unresolved_eicas_rows = link_eicas_references(
             document,
             excluded_pages=inserted_page_indices,
         )
         document.set_toc(_build_outline(document, source_toc, plans, insertions))
-        revision_update = apply_revision_updates(
-            document,
-            revision_changes,
-            revision=revision,
-            revision_date=revision_date,
-        ).to_dict()
+        revision_update: dict = {}
 
         if output_pdf.exists():
             output_pdf.unlink()
@@ -338,29 +323,10 @@ def _draw_section_toc_page(
         indent = max(0, heading.level - 1) * settings.toc_indent_per_level
         x = settings.toc_margin_x + indent
         font_size = max(settings.toc_entry_font_size - (heading.level - 1) * 0.25, 8.5)
-        page_number_text = str(target_page_number)
-        page_number_width = fitz.get_text_length(page_number_text, fontname=settings.toc_font, fontsize=font_size)
-        max_title_width = max(60.0, right_x - x - page_number_width - 16)
+        max_title_width = max(60.0, right_x - x - 8)
         display_title = _truncate_to_width(heading.title, max_title_width, settings.toc_font, font_size)
-        title_width = fitz.get_text_length(display_title, fontname=settings.toc_font, fontsize=font_size)
-        dots = _leader_dots(right_x - page_number_width - 8 - (x + title_width), settings.toc_font, font_size)
 
         page.insert_text((x, y), display_title, fontsize=font_size, fontname=settings.toc_font, color=(0, 0, 0))
-        if dots:
-            page.insert_text(
-                (x + title_width + 4, y),
-                dots,
-                fontsize=font_size,
-                fontname=settings.toc_font,
-                color=(0.45, 0.45, 0.45),
-            )
-        page.insert_text(
-            (right_x - page_number_width, y),
-            page_number_text,
-            fontsize=font_size,
-            fontname=settings.toc_font,
-            color=(0, 0, 0),
-        )
         page.insert_link(
             {
                 "kind": fitz.LINK_GOTO,
@@ -589,14 +555,6 @@ def _delete_overlapping_links(page: fitz.Page, rect: fitz.Rect) -> None:
         link_rect = fitz.Rect(link["from"])
         if link_rect.intersects(rect):
             page.delete_link(link)
-
-
-def _leader_dots(available_width: float, fontname: str, fontsize: float) -> str:
-    if available_width <= 8:
-        return ""
-    dot_width = max(fitz.get_text_length(".", fontname=fontname, fontsize=fontsize), 1.0)
-    count = int(available_width / dot_width)
-    return "." * max(0, count)
 
 
 def _truncate_to_width(text: str, max_width: float, fontname: str, fontsize: float) -> str:
