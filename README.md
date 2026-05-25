@@ -18,7 +18,7 @@ A FastAPI backend service that accepts a text-based PDF, detects headings from l
 - Add PDF outline/sidebar bookmarks with `fitz.Document.set_toc()`.
 - Name sidebar bookmarks from destination page headers when available, for example `787_57_wings`.
 - Convert uploaded PDFs to layout-preserving XML with page, block, line, span, image, link, annotation, and font metadata.
-- Run generation through Redis Queue, with a local background fallback for development.
+- Run generation through a built-in Python in-process queue.
 
 ## Project Structure
 
@@ -73,8 +73,7 @@ This starts:
 - FastAPI backend: `http://localhost:8000`
 - Swagger UI: `http://localhost:8000/docs`
 - React dashboard: `http://localhost:5173`
-- Redis queue: `localhost:6379`
-- RQ worker for PDF processing
+- Built-in Python queue worker inside the API service
 
 Uploaded and generated files are persisted on your machine through the mounted `data/` folder:
 
@@ -98,7 +97,7 @@ docker compose up
 Optional port overrides:
 
 ```bash
-API_PORT=8010 FRONTEND_PORT=5178 REDIS_PORT=6380 docker compose up --build
+API_PORT=8010 FRONTEND_PORT=5178 docker compose up --build
 ```
 
 You can also copy `.env.docker.example` to `.env` and edit the ports there before starting Compose.
@@ -117,41 +116,20 @@ VITE_API_BASE_URL=http://localhost:8010 docker compose up --build
 
 The Docker backend image includes Tesseract OCR with English language data for image-based EICAS pages.
 
-Start Redis if you want RQ-backed jobs:
-
-```bash
-redis-server
-```
-
 Start the API:
 
 ```bash
 uvicorn app.main:app --reload
 ```
 
-Start an RQ worker in a second terminal on Linux, macOS, WSL, or Docker:
+No separate worker process is required. The API starts an in-process worker thread automatically.
 
-```bash
-rq worker -u redis://localhost:6379/0 pdf-toc
-```
-
-On Windows PowerShell, RQ's default worker is not compatible because it uses Unix-only `os.fork()` and `SIGALRM`. Use the bundled Windows-safe worker for local development:
+To verify this behavior from the terminal:
 
 ```powershell
 python -m app.workers.run_worker
 ```
 
-You can also override Redis or queue settings:
-
-```powershell
-python -m app.workers.run_worker --url redis://localhost:6379/0 --queue pdf-toc
-```
-
-If Redis is not available, the API falls back to a local FastAPI background task by default. Disable that with:
-
-```bash
-ALLOW_INLINE_FALLBACK=false
-```
 
 ### OCR for Image-Based EICAS Pages
 
@@ -475,7 +453,7 @@ The initial implementation uses local filesystem storage:
 - XML output: `data/output/{document_id}.xml`
 - XML statistics: `data/output/{document_id}_xml_stats.json`
 - Document metadata: `data/documents.json`
-- Local fallback job metadata: `data/jobs.json`
+- Local queue job metadata: `data/jobs.json`
 
 ## Limitations
 

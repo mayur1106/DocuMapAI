@@ -173,7 +173,7 @@ class GenerateResponse(BaseModel):
     job_id: str = Field(description="Background job ID used by the status endpoint.")
     document_id: str = Field(description="Document ID being processed.")
     status: str = Field(description="Initial job status.")
-    backend: str = Field(description="Job backend. Usually 'rq', or 'local' when Redis is unavailable.")
+    backend: str = Field(description="Job backend. Uses the built-in local Python queue worker.")
 
 
 class StatusResponse(BaseModel):

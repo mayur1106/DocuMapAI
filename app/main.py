@@ -5,7 +5,7 @@ from pathlib import PureWindowsPath
 from typing import Annotated
 
 import fitz
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, Path, Query, Response, UploadFile, status as http_status
+from fastapi import FastAPI, File, HTTPException, Path, Query, Response, UploadFile, status as http_status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, PlainTextResponse
 from app.config import get_settings
@@ -23,7 +23,7 @@ from app.models import (
     XmlConversionResponse,
     XmlStatsResponse,
 )
-from app.services import jobs, storage
+from app.services import jobs, local_queue, storage
 from app.services.pdf_xml_parser import convert_pdf_to_xml, read_xml_preview
 from app.services.storage import PDFValidationError
 from app.services.toc_revision_dry_run import build_toc_revision_dry_run
@@ -99,6 +99,7 @@ app.add_middleware(
 @app.on_event("startup")
 def startup() -> None:
     storage.ensure_storage(settings)
+    local_queue.ensure_worker_started(settings)
 
 
 @app.get(
@@ -459,8 +460,7 @@ async def download_xml(
         "the service preserves them and repairs their links. If no visible TOC exists, it generates "
         "new clickable TOC pages from MEL ITEM + DESCRIPTION table rows, with layout-based heading "
         "detection as a fallback. "
-        "When Redis Queue is available the job is queued in RQ; otherwise the development fallback "
-        "runs the job as a FastAPI background task."
+        "Jobs are queued using an in-process Python worker queue."
     ),
     response_description="Queued generation job.",
     responses={
@@ -470,7 +470,6 @@ async def download_xml(
 )
 async def generate_toc(
     document_id: Annotated[str, Path(description="Document ID returned by the upload endpoint.")],
-    background_tasks: BackgroundTasks,
 ) -> GenerateResponse:
     try:
         record = storage.get_document(document_id, settings)
@@ -480,7 +479,7 @@ async def generate_toc(
         raise HTTPException(status_code=409, detail="This file belongs to the PDF conversion workflow.")
 
     try:
-        return jobs.enqueue_generation(document_id, background_tasks, settings)
+        return jobs.enqueue_generation(document_id, settings)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Unable to enqueue TOC generation: {exc}") from exc
 
@@ -505,7 +504,6 @@ async def generate_toc(
 )
 async def hyperlink_existing_toc(
     document_id: Annotated[str, Path(description="Document ID returned by the upload endpoint.")],
-    background_tasks: BackgroundTasks,
 ) -> GenerateResponse:
     try:
         record = storage.get_document(document_id, settings)
@@ -515,7 +513,7 @@ async def hyperlink_existing_toc(
         raise HTTPException(status_code=409, detail="This file belongs to the PDF conversion workflow.")
 
     try:
-        return jobs.enqueue_existing_toc_linking(document_id, background_tasks, settings)
+        return jobs.enqueue_existing_toc_linking(document_id, settings)
     except Exception as exc:
         raise HTTPException(status_code=503, detail=f"Unable to enqueue existing TOC hyperlinking: {exc}") from exc
 

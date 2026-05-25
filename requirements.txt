@@ -3,6 +3,3 @@ uvicorn[standard]==0.34.0
 PyMuPDF==1.25.1
 python-multipart==0.0.20
 pydantic-settings==2.7.1
-redis==5.2.1
-rq==2.1.0
-
