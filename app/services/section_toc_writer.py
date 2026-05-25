@@ -19,7 +19,6 @@ from app.services.existing_toc_linker import (
     link_eicas_references,
     resolve_target_page,
 )
-from app.services.revision_manager import RevisionPageChange, apply_revision_updates
 
 
 ATA_RE = re.compile(r"\bATA\s*[-\u2013\u2014]?\s*(\d{2})\b", re.IGNORECASE)
@@ -112,7 +111,6 @@ def write_pdf_with_section_tocs(
                 document.fullcopy_page(insert_at + offset, to=insert_at + offset)
 
         inserted_page_indices: list[int] = []
-        revision_changes: list[RevisionPageChange] = []
         sections: list[dict] = []
         chapter_toc_counts: dict[str, int] = {}
         for plan in plans:
@@ -148,26 +146,12 @@ def write_pdf_with_section_tocs(
                     insertions=insertions,
                     settings=settings,
                 )
-                revision_changes.append(
-                    RevisionPageChange(
-                        page_index=first_toc_page - 1 + page_offset,
-                        page_label=page_label,
-                        change_type="insert_section_toc_page",
-                    )
-                )
-
         _link_global_toc_rows(document, global_rows, plans, insertions)
         linked_eicas_rows, unresolved_eicas_rows = link_eicas_references(
             document,
             excluded_pages=inserted_page_indices,
         )
         document.set_toc(_build_outline(document, source_toc, plans, insertions))
-        revision_update = apply_revision_updates(
-            document,
-            revision_changes,
-            revision=revision,
-            revision_date=revision_date,
-        ).to_dict()
 
         if output_pdf.exists():
             output_pdf.unlink()
@@ -181,7 +165,6 @@ def write_pdf_with_section_tocs(
         linked_global_rows=len(global_rows),
         linked_eicas_rows=len(linked_eicas_rows),
         unresolved_eicas_rows=len(unresolved_eicas_rows),
-        revision_update=revision_update,
     )
 
 

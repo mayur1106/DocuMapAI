@@ -9,7 +9,6 @@ from app.config import Settings, get_settings
 from app.models import Heading
 from app.services.bookmark_namer import bookmark_title_for_page
 from app.services.existing_toc_linker import link_eicas_references
-from app.services.revision_manager import RevisionPageChange, apply_revision_updates
 from app.services.toc_builder import paginate_toc_entries
 
 
@@ -51,11 +50,6 @@ def write_pdf_with_toc(
                 settings,
             )
 
-        revision_changes = [
-            RevisionPageChange(page_index=page_index, page_label=f"TOC-{page_index + 1}", change_type="insert_front_toc_page")
-            for page_index in range(toc_page_count)
-        ]
-
         bookmark_cache: dict[int, str] = {}
         outline = [
             [
@@ -72,12 +66,6 @@ def write_pdf_with_toc(
         ]
         document.set_toc(outline)
         link_eicas_references(document, excluded_pages=list(range(toc_page_count)))
-        apply_revision_updates(
-            document,
-            revision_changes,
-            revision=revision,
-            revision_date=revision_date,
-        )
 
         if output_pdf.exists():
             output_pdf.unlink()
