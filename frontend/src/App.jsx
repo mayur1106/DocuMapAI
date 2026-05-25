@@ -38,7 +38,9 @@ import {
   getActivityLogs,
   getDownloadUrl,
   getJobStatus,
+  getProcessStream,
   getToc,
+  getUnresolvedReportDownloadUrl,
   getXmlDownloadUrl,
   getXmlPreview,
   getXmlStats,
@@ -87,6 +89,7 @@ function App() {
   const [activeJob, setActiveJob] = useState(null);
   const [jobStatus, setJobStatus] = useState(null);
   const [activityLogs, setActivityLogs] = useState([]);
+  const [processStream, setProcessStream] = useState("");
   const [activityLoading, setActivityLoading] = useState(false);
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(null);
@@ -272,6 +275,12 @@ function App() {
         const status = await getJobStatus(activeJob.job_id);
         if (cancelled) return;
         setJobStatus(status);
+        try {
+          const stream = await getProcessStream(status.document_id || activeJob.document_id);
+          if (!cancelled) setProcessStream(stream);
+        } catch {
+          if (!cancelled) setProcessStream("");
+        }
 
         if (["finished", "failed"].includes(status.status)) {
           setActiveJob(null);
@@ -387,6 +396,7 @@ function App() {
           : await generateToc(documentId);
       setActiveJob({ ...result, kind });
       setJobStatus(result);
+      setProcessStream("");
       setNotice({ type: "success", message: "Job queued. The worker is preparing the document." });
       await refreshDocuments(documentId);
       await loadActivityLogs();
@@ -510,6 +520,28 @@ function App() {
                 onDrop={onDrop}
                 onUpload={handleUpload}
               />
+            </section>
+
+            <section className="table-panel" aria-labelledby="live-process-title">
+              <div className="panel-header compact">
+                <div>
+                  <p className="eyebrow">Live Logs</p>
+                  <h2 id="live-process-title">TOC Processing Stream</h2>
+                </div>
+                {selectedDocument?.id ? (
+                  <a
+                    className="secondary-button"
+                    href={getUnresolvedReportDownloadUrl(selectedDocument.id)}
+                    onClick={(event) => event.stopPropagation()}
+                  >
+                    <ArrowDownToLine size={16} />
+                    Unresolved Links Report
+                  </a>
+                ) : null}
+              </div>
+              <pre className="xml-preview">
+                {processStream || (processing ? "Waiting for worker logs..." : "Start TOC generation or hyperlinking to see live logs here.")}
+              </pre>
             </section>
 
             <section className="content-grid">

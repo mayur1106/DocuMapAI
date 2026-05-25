@@ -14,6 +14,7 @@ from app.services.heading_detector import detect_headings
 from app.services.mel_table_extractor import extract_mel_table_headings
 from app.services.pdf_parser import extract_lines
 from app.services.pdf_writer import write_pdf_with_toc
+from app.services.process_logs import append_stream, write_unresolved_report
 from app.services.section_toc_writer import (
     has_missing_section_toc_pattern,
     write_pdf_with_section_tocs,
@@ -38,6 +39,7 @@ def generate_toc_task(document_id: str) -> dict:
         settings=settings,
     )
     logger.info("Processing TOC for document %s", document_id)
+    append_stream(document_id, "processing_started")
 
     try:
         output_path = settings.output_dir / f"{document_id}_with_toc.pdf"
@@ -45,6 +47,7 @@ def generate_toc_task(document_id: str) -> dict:
         headings: list[Heading] | None = None
 
         if global_toc_pages and not local_toc_pages:
+            append_stream(document_id, "mode_check: global_toc_present local_toc_missing")
             headings = extract_mel_table_headings(record.original_path)
             if headings and has_missing_section_toc_pattern(record.original_path, headings, settings):
                 result = write_pdf_with_section_tocs(
@@ -68,6 +71,10 @@ def generate_toc_task(document_id: str) -> dict:
                     len(result.sections),
                     result.heading_count,
                 )
+                append_stream(
+                    document_id,
+                    f"completed_inserted_section_tocs sections={len(result.sections)} heading_count={result.heading_count}",
+                )
                 log_activity(
                     action="toc_processing_completed",
                     status="success",
@@ -87,11 +94,20 @@ def generate_toc_task(document_id: str) -> dict:
                 }
 
         if global_toc_pages or local_toc_pages:
+            append_stream(document_id, "mode_check: existing_toc_detected linking")
             result = hyperlink_existing_toc(
                 record.original_path,
                 output_path,
             )
             headings = _headings_from_existing_toc(result)
+            unresolved_report = None
+            if result.unresolved_rows:
+                report_path = write_unresolved_report(document_id, result.unresolved_rows, settings)
+                unresolved_report = str(report_path)
+                append_stream(
+                    document_id,
+                    f"unresolved_links={len(result.unresolved_rows)} report={report_path.name}",
+                )
             toc_path = save_toc(document_id, headings, settings)
             update_document_status(
                 document_id,
@@ -125,6 +141,7 @@ def generate_toc_task(document_id: str) -> dict:
                 "document_id": document_id,
                 "mode": "linked_existing_toc",
                 "heading_count": len(headings),
+                "unresolved_report": unresolved_report,
                 **result.to_dict(),
             }
 
@@ -153,6 +170,7 @@ def generate_toc_task(document_id: str) -> dict:
             settings=settings,
         )
         logger.info("Generated %s for document %s with %d entries", mode, document_id, len(headings))
+        append_stream(document_id, f"completed_{mode} heading_count={len(headings)}")
         log_activity(
             action="toc_processing_completed",
             status="success",
@@ -169,6 +187,7 @@ def generate_toc_task(document_id: str) -> dict:
             "toc": flatten_toc(headings),
         }
     except Exception as exc:
+        append_stream(document_id, f"processing_failed error={exc}")
         _mark_document_failed(document_id, exc, settings)
         log_activity(
             action="toc_processing_failed",
@@ -219,6 +238,7 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         settings=settings,
     )
     logger.info("Hyperlinking existing TOC for document %s", document_id)
+    append_stream(document_id, "hyperlink_processing_started")
 
     try:
         output_path = settings.output_dir / f"{document_id}_linked_toc.pdf"
@@ -226,6 +246,14 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
             record.original_path,
             output_path,
         )
+        unresolved_report = None
+        if result.unresolved_rows:
+            report_path = write_unresolved_report(document_id, result.unresolved_rows, settings)
+            unresolved_report = str(report_path)
+            append_stream(
+                document_id,
+                f"unresolved_links={len(result.unresolved_rows)} report={report_path.name}",
+            )
         update_document_status(
             document_id,
             DocumentStatus.READY,
@@ -253,9 +281,11 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
         )
         return {
             "document_id": document_id,
+            "unresolved_report": unresolved_report,
             **result.to_dict(),
         }
     except Exception as exc:
+        append_stream(document_id, f"hyperlink_processing_failed error={exc}")
         _mark_document_failed(document_id, exc, settings)
         log_activity(
             action="hyperlink_processing_failed",

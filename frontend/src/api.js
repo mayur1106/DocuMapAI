@@ -85,8 +85,16 @@ export function getToc(documentId) {
   return request(`/toc/${documentId}`);
 }
 
+export function getProcessStream(documentId) {
+  return request(`/process-stream/${documentId}`);
+}
+
 export function getDownloadUrl(documentId) {
   return `${API_BASE_URL}/download/${documentId}`;
+}
+
+export function getUnresolvedReportDownloadUrl(documentId) {
+  return `${API_BASE_URL}/unresolved-report/${documentId}/download`;
 }
 
 export function getXmlDownloadUrl(documentId) {

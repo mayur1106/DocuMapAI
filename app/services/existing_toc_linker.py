@@ -36,6 +36,7 @@ class ExistingTocRow:
     target_label: str | None = None
     target_page_index: int | None = None
     target_y: float = 0.0
+    unresolved_reason: str | None = None
 
     @property
     def page_number(self) -> int:
@@ -123,14 +124,20 @@ def hyperlink_existing_toc(
                 if location is not None:
                     row.target_page_index = location[0]
                     row.target_y = location[1]
+                else:
+                    row.unresolved_reason = "item_label_not_found_in_body"
             elif row.toc_type == "reference":
                 location = item_index.get(normalize_label(row.target_label or ""))
                 if location is not None:
                     row.target_page_index = location[0]
                     row.target_y = location[1]
+                else:
+                    row.unresolved_reason = "eicas_item_not_found_in_body"
             else:
                 row.target_label = infer_target_label(row)
                 row.target_page_index = resolve_target_page(row, label_index, outline_index)
+                if row.target_page_index is None:
+                    row.unresolved_reason = "page_label_or_outline_not_resolved"
 
             if row.target_page_index is None:
                 unresolved_rows.append(row)
@@ -194,6 +201,7 @@ def link_eicas_references(
     for row in rows:
         location = item_index.get(normalize_label(row.target_label or ""))
         if location is None:
+            row.unresolved_reason = "eicas_item_not_found_in_body"
             unresolved_rows.append(row)
             continue
 
@@ -1111,4 +1119,5 @@ def _row_to_dict(row: ExistingTocRow) -> dict:
         "toc_type": row.toc_type,
         "target_label": row.target_label,
         "target_page": row.target_page_number,
+        "unresolved_reason": row.unresolved_reason,
     }

@@ -24,6 +24,7 @@ from app.models import (
     XmlStatsResponse,
 )
 from app.services import jobs, local_queue, storage
+from app.services.process_logs import read_stream, unresolved_report_path
 from app.services.pdf_xml_parser import convert_pdf_to_xml, read_xml_preview
 from app.services.storage import PDFValidationError
 from app.services.toc_revision_dry_run import build_toc_revision_dry_run
@@ -598,6 +599,51 @@ async def get_toc(
         )
         for heading in headings
     ]
+
+
+@app.get(
+    "/process-stream/{document_id}",
+    response_class=PlainTextResponse,
+    tags=["TOC Generation", "Existing TOC Linking"],
+    summary="Preview live process logs",
+    description="Returns tail log lines emitted while TOC generation or hyperlinking is running.",
+)
+async def process_stream(
+    document_id: Annotated[str, Path(description="Document ID returned by the upload endpoint.")],
+) -> PlainTextResponse:
+    try:
+        storage.get_document(document_id, settings)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Document not found.") from exc
+    try:
+        return PlainTextResponse(read_stream(document_id, settings), media_type="text/plain")
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="No process stream available for this document.") from exc
+
+
+@app.get(
+    "/unresolved-report/{document_id}/download",
+    response_class=FileResponse,
+    tags=["TOC Generation", "Existing TOC Linking"],
+    summary="Download unresolved hyperlink report",
+    description="Downloads an Excel report listing each unresolved TOC/EICAS hyperlink and reason.",
+)
+async def download_unresolved_report(
+    document_id: Annotated[str, Path(description="Document ID returned by the upload endpoint.")],
+) -> FileResponse:
+    try:
+        record = storage.get_document(document_id, settings)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Document not found.") from exc
+    report_path = unresolved_report_path(document_id, settings)
+    if not report_path.exists():
+        raise HTTPException(status_code=404, detail="No unresolved hyperlink report is available.")
+    filename = _download_filename(record.original_filename, suffix="_unresolved_links", extension=".xlsx")
+    return FileResponse(
+        report_path,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        filename=filename,
+    )
 
 
 @app.get(
