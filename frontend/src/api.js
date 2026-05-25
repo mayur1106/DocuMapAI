@@ -85,10 +85,6 @@ export function getToc(documentId) {
   return request(`/toc/${documentId}`);
 }
 
-export function getProcessStream(documentId) {
-  return request(`/process-stream/${documentId}`);
-}
-
 export function getDownloadUrl(documentId) {
   return `${API_BASE_URL}/download/${documentId}`;
 }

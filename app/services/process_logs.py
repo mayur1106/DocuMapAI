@@ -7,6 +7,19 @@ from openpyxl import Workbook
 from app.config import Settings, get_settings
 from app.services.existing_toc_linker import ExistingTocRow
 
+UNRESOLVED_REASON_MESSAGES = {
+    "item_label_not_found_in_body": (
+        "Local TOC item label was detected, but no matching MEL item label was found in body pages."
+    ),
+    "eicas_item_not_found_in_body": (
+        "EICAS reference label was detected, but no matching MEL item label was found in body pages."
+    ),
+    "page_label_or_outline_not_resolved": (
+        "Global TOC target could not be resolved from page label text or PDF outline/bookmarks."
+    ),
+    "target_not_found": "Hyperlink target could not be resolved.",
+}
+
 
 def process_stream_path(document_id: str, settings: Settings | None = None) -> Path:
     settings = settings or get_settings()
@@ -53,9 +66,11 @@ def write_unresolved_report(
             "reference_text",
             "target_label",
             "reason",
+            "detailed_error",
         ]
     )
     for row in unresolved_rows:
+        reason_code = row.unresolved_reason or "target_not_found"
         worksheet.append(
             [
                 row.toc_type,
@@ -63,7 +78,8 @@ def write_unresolved_report(
                 row.title,
                 row.reference_text,
                 row.target_label or "",
-                row.unresolved_reason or "target_not_found",
+                reason_code,
+                UNRESOLVED_REASON_MESSAGES.get(reason_code, "Hyperlink target resolution failed."),
             ]
         )
     workbook.save(path)
