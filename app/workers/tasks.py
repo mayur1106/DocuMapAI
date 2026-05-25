@@ -14,7 +14,7 @@ from app.services.heading_detector import detect_headings
 from app.services.mel_table_extractor import extract_mel_table_headings
 from app.services.pdf_parser import extract_lines
 from app.services.pdf_writer import write_pdf_with_toc
-from app.services.process_logs import append_stream, write_unresolved_report
+from app.services.process_logs import append_stream, unresolved_report_path, write_unresolved_report
 from app.services.section_toc_writer import (
     has_missing_section_toc_pattern,
     write_pdf_with_section_tocs,
@@ -40,6 +40,9 @@ def generate_toc_task(document_id: str) -> dict:
     )
     logger.info("Processing TOC for document %s", document_id)
     append_stream(document_id, "processing_started")
+    report_path = unresolved_report_path(document_id, settings)
+    if report_path.exists():
+        report_path.unlink()
 
     try:
         output_path = settings.output_dir / f"{document_id}_with_toc.pdf"
@@ -239,6 +242,9 @@ def hyperlink_existing_toc_task(document_id: str) -> dict:
     )
     logger.info("Hyperlinking existing TOC for document %s", document_id)
     append_stream(document_id, "hyperlink_processing_started")
+    report_path = unresolved_report_path(document_id, settings)
+    if report_path.exists():
+        report_path.unlink()
 
     try:
         output_path = settings.output_dir / f"{document_id}_linked_toc.pdf"

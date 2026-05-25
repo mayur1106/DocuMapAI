@@ -1226,6 +1226,7 @@ function DocumentRowActions({ document, isActiveJob, processing, deleting, onPro
   const status = lifecycleStatus(document.status);
   const isRunning = isActiveJob || ["queued", "processing"].includes(status);
   const canDownload = isReadyStatus(status) && document.has_output;
+  const canDownloadReport = Boolean(document.has_unresolved_report);
 
   return (
     <div className="row-actions" aria-label={`Actions for ${document.filename}`} onClick={(event) => event.stopPropagation()}>
@@ -1265,16 +1266,29 @@ function DocumentRowActions({ document, isActiveJob, processing, deleting, onPro
         </button>
       )}
 
-      <a
-        className="row-icon-action download"
-        href={getUnresolvedReportDownloadUrl(document.id)}
-        title="Download hyperlink logs report"
-        aria-label="Download hyperlink logs report"
-        data-tooltip="Download hyperlink logs report"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <FileCheck2 size={16} />
-      </a>
+      {canDownloadReport ? (
+        <a
+          className="row-icon-action download"
+          href={getUnresolvedReportDownloadUrl(document.id)}
+          title="Download hyperlink logs report"
+          aria-label="Download hyperlink logs report"
+          data-tooltip="Download hyperlink logs report"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <FileCheck2 size={16} />
+        </a>
+      ) : (
+        <button
+          className="row-icon-action download"
+          type="button"
+          disabled
+          title="No failed hyperlinks report for this document"
+          aria-label="No failed hyperlinks report for this document"
+          data-tooltip="No failed hyperlinks report for this document"
+        >
+          <FileCheck2 size={16} />
+        </button>
+      )}
 
       <button
         className="row-icon-action delete"

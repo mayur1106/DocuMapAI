@@ -155,6 +155,10 @@ class DocumentResponse(BaseModel):
     has_output: bool = Field(description="Whether a processed PDF is available for download.")
     has_toc: bool = Field(description="Whether TOC JSON is available.")
     has_xml: bool = Field(default=False, description="Whether PDF-to-XML output is available.")
+    has_unresolved_report: bool = Field(
+        default=False,
+        description="Whether an unresolved hyperlink error report is available for download.",
+    )
     error: str | None = Field(default=None, description="Failure details when processing fails.")
 
 

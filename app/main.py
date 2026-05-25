@@ -223,6 +223,7 @@ async def list_documents(
             has_output=bool(record.output_path and record.output_path.exists()),
             has_toc=bool(record.toc_path and record.toc_path.exists()),
             has_xml=bool(record.xml_path and record.xml_path.exists()),
+            has_unresolved_report=unresolved_report_path(record.id, settings).exists(),
             error=record.error,
         )
         for record in storage.list_documents(settings)
