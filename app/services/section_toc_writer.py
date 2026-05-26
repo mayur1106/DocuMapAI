@@ -440,13 +440,14 @@ def _draw_toc_side_bar(
     if page_number_in_section_toc % 2 == 1:
         x = min(page.rect.width - 8.0, content_right_x + 4.0)
     else:
-        x = max(8.0, content_left_x - 4.0)
+        # Keep more breathing room from left-side TOC content on even pages.
+        x = max(8.0, content_left_x - 10.0)
 
     page.draw_line(
         fitz.Point(x, top_y),
         fitz.Point(x, bottom_y),
         color=(0, 0, 0),
-        width=1.0,
+        width=0.6,
         overlay=True,
     )
 
