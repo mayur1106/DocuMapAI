@@ -38,13 +38,14 @@ class SectionTocPlan:
     source_end_page: int
     headings: list[Heading]
     toc_pages: list[list[Heading]]
+    append_blank_page: bool = False
     body_start_y: float = 90.0
     footer_top_y: float = 742.0
     footer_baseline_y: float = 753.0
 
     @property
     def inserted_page_count(self) -> int:
-        return len(self.toc_pages)
+        return len(self.toc_pages) + (1 if self.append_blank_page else 0)
 
 
 @dataclass
@@ -98,6 +99,7 @@ def write_pdf_with_section_tocs(
 
     with fitz.open(source_pdf) as document:
         source_toc = document.get_toc()
+        blank_template_page_index = _find_intentionally_blank_template_page(document)
         plans = _build_section_toc_plans(document, headings, settings)
         if not plans:
             raise ValueError("No ATA sections with MEL table rows were found for chapter TOC insertion.")
@@ -108,7 +110,10 @@ def write_pdf_with_section_tocs(
         for plan in sorted(plans, key=lambda item: item.source_start_page, reverse=True):
             insert_at = plan.source_start_page - 1
             for offset in range(plan.inserted_page_count):
-                document.fullcopy_page(insert_at + offset, to=insert_at + offset)
+                if plan.append_blank_page and offset == plan.inserted_page_count - 1 and blank_template_page_index is not None:
+                    document.fullcopy_page(blank_template_page_index, to=insert_at + offset)
+                else:
+                    document.fullcopy_page(insert_at + offset, to=insert_at + offset)
 
         inserted_page_indices: list[int] = []
         sections: list[dict] = []
@@ -120,9 +125,9 @@ def write_pdf_with_section_tocs(
             first_chapter_toc_number = chapter_toc_counts.get(plan.chapter, 0) + 1
             toc_labels = [
                 f"TOC {plan.chapter}-{first_chapter_toc_number + page_offset}"
-                for page_offset in range(plan.inserted_page_count)
+                for page_offset in range(len(plan.toc_pages))
             ]
-            chapter_toc_counts[plan.chapter] = first_chapter_toc_number + plan.inserted_page_count - 1
+            chapter_toc_counts[plan.chapter] = first_chapter_toc_number + len(plan.toc_pages) - 1
             sections.append(
                 {
                     "title": plan.title,
@@ -132,6 +137,7 @@ def write_pdf_with_section_tocs(
                     "toc_pages": section_pages,
                     "toc_labels": toc_labels,
                     "entry_count": len(plan.headings),
+                    "appended_blank_page": plan.append_blank_page,
                 }
             )
 
@@ -212,13 +218,26 @@ def _build_section_toc_plans(
                     footer_top_y,
                     settings,
                 ),
+                append_blank_page=False,
                 body_start_y=body_start_y,
                 footer_top_y=footer_top_y,
                 footer_baseline_y=footer_baseline_y,
             )
         )
 
+    for plan in plans:
+        if plan.inserted_page_count % 2 == 1:
+            plan.append_blank_page = True
+
     return plans
+
+
+def _find_intentionally_blank_template_page(document: fitz.Document) -> int | None:
+    for page_index in range(len(document)):
+        text = " ".join(document[page_index].get_text("text").upper().split())
+        if "INTENTIONALLY LEFT BLANK" in text:
+            return page_index
+    return None
 
 
 def _section_roots(document: fitz.Document) -> list[dict[str, int | str]]:
