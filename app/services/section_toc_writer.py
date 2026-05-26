@@ -233,11 +233,26 @@ def _build_section_toc_plans(
 
 
 def _find_intentionally_blank_template_page(document: fitz.Document) -> int | None:
+    best_page_index: int | None = None
+    best_score = -1
     for page_index in range(len(document)):
-        text = " ".join(document[page_index].get_text("text").upper().split())
-        if "INTENTIONALLY LEFT BLANK" in text:
-            return page_index
-    return None
+        page = document[page_index]
+        text = " ".join(page.get_text("text").upper().split())
+        if "INTENTIONALLY LEFT BLANK" not in text:
+            continue
+
+        # Prefer blank templates that already include normal top header content.
+        top_words = [
+            word
+            for word in page.get_text("words")
+            if float(word[1]) <= min(110.0, page.rect.height * 0.2)
+        ]
+        score = 3 if top_words else 1
+        if score > best_score:
+            best_page_index = page_index
+            best_score = score
+
+    return best_page_index
 
 
 def _section_roots(document: fitz.Document) -> list[dict[str, int | str]]:
@@ -322,6 +337,14 @@ def _draw_section_toc_page(
 
     width = page.rect.width
     right_x = width - settings.toc_margin_x
+    _draw_toc_side_bar(
+        page=page,
+        page_number_in_section_toc=page_offset + 1,
+        content_left_x=settings.toc_margin_x,
+        content_right_x=right_x,
+        top_y=plan.body_start_y + 3.0,
+        bottom_y=max(plan.body_start_y + 24.0, plan.footer_top_y - 6.0),
+    )
     if page_offset == 0:
         title = "Table of Contents"
         title_font_size = 11.0
@@ -399,6 +422,32 @@ def _prepare_section_toc_template(
         fontsize=footer_font_size,
         fontname=settings.toc_font,
         color=(0, 0, 0),
+    )
+
+
+def _draw_toc_side_bar(
+    *,
+    page: fitz.Page,
+    page_number_in_section_toc: int,
+    content_left_x: float,
+    content_right_x: float,
+    top_y: float,
+    bottom_y: float,
+) -> None:
+    if bottom_y <= top_y:
+        return
+
+    if page_number_in_section_toc % 2 == 1:
+        x = min(page.rect.width - 8.0, content_right_x + 4.0)
+    else:
+        x = max(8.0, content_left_x - 4.0)
+
+    page.draw_line(
+        fitz.Point(x, top_y),
+        fitz.Point(x, bottom_y),
+        color=(0, 0, 0),
+        width=1.0,
+        overlay=True,
     )
 
 
