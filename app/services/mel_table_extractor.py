@@ -11,6 +11,7 @@ from app.models import Heading
 
 ATA_RE = re.compile(r"\bATA\s*[-\u2013\u2014]?\s*(\d{2})\b", re.IGNORECASE)
 ITEM_LABEL_RE = re.compile(r"^\d{2}(?:-\d{2}){1,6}[A-Z]?$")
+FOOTNOTE_LEGEND_RE = re.compile(r"^(?P<marker>[#*]+)\s+(?P<text>.+)$")
 STOP_SECTION_RE = re.compile(
     r"^(MAINTENANCE|OPERATIONS?|OPERATIONAL|DISPATCH|CREW|NOTE\b|DEACTIVATION|RESTORATION)\b",
     re.IGNORECASE,
@@ -138,7 +139,48 @@ def _extract_page_entries(page: fitz.Page, page_number: int) -> list[MelTableEnt
     if current and current.title:
         entries.append(current)
 
+    _apply_footnote_legend(entries, lines, geometry)
     return entries
+
+
+def _apply_footnote_legend(entries: list[MelTableEntry], lines: list[dict[str, object]], geometry: TableGeometry) -> None:
+    if not entries:
+        return
+    legend_map = _footnote_legend_map(lines, geometry)
+    if not legend_map:
+        return
+
+    for entry in entries:
+        if not entry.description_parts:
+            continue
+        description = normalize_text(" ".join(entry.description_parts))
+        replacement = legend_map.get(description)
+        if replacement:
+            entry.description_parts = [replacement]
+
+
+def _footnote_legend_map(lines: list[dict[str, object]], geometry: TableGeometry) -> dict[str, str]:
+    legends: dict[str, str] = {}
+    for line in lines:
+        y0 = float(line["y0"])
+        if y0 < geometry.top_y:
+            continue
+        words = line["words"]
+        if not words:
+            continue
+        first_x = min(float(word[0]) for word in words)
+        # Footnote legend lines are usually left-aligned under the table body.
+        if first_x > geometry.item_left + 24.0:
+            continue
+        line_text = _words_to_text(words)
+        match = FOOTNOTE_LEGEND_RE.match(line_text)
+        if not match:
+            continue
+        marker = normalize_text(match.group("marker"))
+        text = normalize_text(match.group("text"))
+        if marker and text:
+            legends[marker] = text
+    return legends
 
 
 def _find_table_geometry(lines: list[dict[str, object]], page_width: float) -> TableGeometry | None:
