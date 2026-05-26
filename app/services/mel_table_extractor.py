@@ -154,8 +154,9 @@ def _apply_footnote_legend(entries: list[MelTableEntry], lines: list[dict[str, o
         if not entry.description_parts:
             continue
         description = normalize_text(" ".join(entry.description_parts))
-        replacement = legend_map.get(description)
-        if replacement:
+        marker = _normalize_marker_only(description)
+        replacement = legend_map.get(marker) if marker else None
+        if replacement and marker:
             entry.description_parts = [replacement]
 
 
@@ -176,11 +177,16 @@ def _footnote_legend_map(lines: list[dict[str, object]], geometry: TableGeometry
         match = FOOTNOTE_LEGEND_RE.match(line_text)
         if not match:
             continue
-        marker = normalize_text(match.group("marker"))
+        marker = _normalize_marker_only(match.group("marker"))
         text = normalize_text(match.group("text"))
         if marker and text:
             legends[marker] = text
     return legends
+
+
+def _normalize_marker_only(text: str) -> str | None:
+    normalized = normalize_text(text)
+    return normalized if re.fullmatch(r"[#*]+", normalized) else None
 
 
 def _find_table_geometry(lines: list[dict[str, object]], page_width: float) -> TableGeometry | None:
