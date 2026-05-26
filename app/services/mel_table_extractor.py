@@ -89,7 +89,7 @@ def _extract_page_entries(page: fitz.Page, page_number: int) -> list[MelTableEnt
     lines = _word_lines(page)
     page_text = page.get_text("text")
     ata_chapter = _ata_chapter(page_text)
-    geometry = _find_table_geometry(lines, page.rect.width)
+    geometry = _find_table_geometry(page, lines, page.rect.width, ata_chapter)
     if ata_chapter is None or geometry is None:
         return []
 
@@ -189,7 +189,12 @@ def _normalize_marker_only(text: str) -> str | None:
     return normalized if re.fullmatch(r"[#*]+", normalized) else None
 
 
-def _find_table_geometry(lines: list[dict[str, object]], page_width: float) -> TableGeometry | None:
+def _find_table_geometry(
+    page: fitz.Page,
+    lines: list[dict[str, object]],
+    page_width: float,
+    ata_chapter: str | None,
+) -> TableGeometry | None:
     all_words = [word for line in lines for word in line["words"]]
     item_words = [word for word in all_words if str(word[4]).strip().upper() == "ITEM"]
     description_words = [word for word in all_words if str(word[4]).strip().upper() == "DESCRIPTION"]
@@ -230,7 +235,83 @@ def _find_table_geometry(lines: list[dict[str, object]], page_width: float) -> T
             top_y=max(float(item_word[3]), float(description_word[3])) + 4.0,
         )
 
-    return None
+    return _infer_table_geometry_without_headers(page, lines, page_width, ata_chapter)
+
+
+def _infer_table_geometry_without_headers(
+    page: fitz.Page,
+    lines: list[dict[str, object]],
+    page_width: float,
+    ata_chapter: str | None,
+) -> TableGeometry | None:
+    if ata_chapter is None:
+        return None
+
+    # Find candidate item labels on the left half of the page.
+    label_candidates: list[tuple[tuple, list[tuple]]] = []
+    for line in lines:
+        words = line["words"]
+        for word in words:
+            label = normalize_label(str(word[4]).strip())
+            x0 = float(word[0])
+            if x0 > page_width * 0.45:
+                continue
+            if ITEM_LABEL_RE.fullmatch(label) and label.startswith(f"{ata_chapter}-"):
+                label_candidates.append((word, words))
+                break
+
+    if not label_candidates:
+        return None
+
+    item_x = min(float(word[0]) for word, _ in label_candidates)
+    item_top = min(float(word[1]) for word, _ in label_candidates)
+
+    description_x_candidates: list[float] = []
+    for label_word, line_words in label_candidates:
+        label_right = float(label_word[2])
+        for word in sorted(line_words, key=lambda item: float(item[0])):
+            x0 = float(word[0])
+            if x0 <= label_right + 2.0 or x0 > page_width * 0.62:
+                continue
+            token = normalize_label(str(word[4]).strip())
+            if re.fullmatch(r"[A-D]|\d+|-|\*+", token):
+                continue
+            description_x_candidates.append(x0)
+            break
+
+    if not description_x_candidates:
+        return None
+    description_x = min(description_x_candidates)
+
+    # Prefer table column borders from vector drawings to place description right edge.
+    verticals: list[float] = []
+    for drawing in page.get_drawings():
+        for item in drawing.get("items", []):
+            if item[0] != "l":
+                continue
+            p1, p2 = item[1], item[2]
+            x1, y1 = float(p1.x), float(p1.y)
+            x2, y2 = float(p2.x), float(p2.y)
+            if abs(x1 - x2) > 0.8:
+                continue
+            if max(y1, y2) < item_top - 2.0 or min(y1, y2) > page.rect.height - 25.0:
+                continue
+            verticals.append((x1 + x2) / 2.0)
+
+    description_right = page_width * 0.52
+    if verticals:
+        candidates = sorted(set(round(x, 1) for x in verticals if x > description_x + 40.0))
+        if candidates:
+            description_right = min(candidates)
+    description_right = max(description_x + 70.0, min(description_right, page_width * 0.7))
+
+    return TableGeometry(
+        item_left=max(0.0, item_x - 24.0),
+        item_right=max(item_x + 38.0, description_x - 8.0),
+        description_left=max(0.0, description_x - 8.0),
+        description_right=description_right,
+        top_y=max(0.0, item_top - 2.0),
+    )
 
 
 def _word_lines(page: fitz.Page) -> list[dict[str, object]]:
