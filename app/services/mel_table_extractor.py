@@ -47,6 +47,7 @@ class MelTableEntry:
     page_number: int = 1
     x0: float = 0.0
     y0: float = 0.0
+    y1: float = 0.0
 
     @property
     def title(self) -> str:
@@ -129,12 +130,14 @@ def _extract_page_entries(page: fitz.Page, page_number: int) -> list[MelTableEnt
                 page_number=page_number,
                 x0=float(words[0][0]),
                 y0=y0,
+                y1=y1,
             )
             continue
 
         if current and description:
             current.description_parts.append(description)
             current.y0 = min(current.y0, y0)
+            current.y1 = max(current.y1, y1)
             continue
 
         if current and y1 - current.y0 > 260:
@@ -151,21 +154,21 @@ def _extract_page_entries(page: fitz.Page, page_number: int) -> list[MelTableEnt
 def _apply_footnote_legend(entries: list[MelTableEntry], lines: list[dict[str, object]], geometry: TableGeometry) -> None:
     if not entries:
         return
-    legend_map = _footnote_legend_map(lines, geometry)
-    if not legend_map:
+    legends = _footnote_legend_occurrences(lines, geometry)
+    if not legends:
         return
 
     for entry in entries:
         if not entry.description_parts:
             continue
         description = normalize_text(" ".join(entry.description_parts))
-        replacement = _replace_description_marker(description, legend_map)
+        replacement = _replace_description_marker(description, legends, entry)
         if replacement:
             entry.description_parts = [replacement]
 
 
-def _footnote_legend_map(lines: list[dict[str, object]], geometry: TableGeometry) -> dict[str, str]:
-    legends: dict[str, str] = {}
+def _footnote_legend_occurrences(lines: list[dict[str, object]], geometry: TableGeometry) -> list[tuple[str, str, float]]:
+    legends: list[tuple[str, str, float]] = []
     index = 0
     while index < len(lines):
         line = lines[index]
@@ -218,7 +221,7 @@ def _footnote_legend_map(lines: list[dict[str, object]], geometry: TableGeometry
             index += 1
 
         if marker and full_text_parts:
-            legends[marker] = normalize_text(" ".join(full_text_parts))
+            legends.append((marker, normalize_text(" ".join(full_text_parts)), float(y0)))
         continue
     return legends
 
@@ -243,7 +246,11 @@ def _is_footnote_legend_line(line_text: str) -> bool:
     return _parse_footnote_legend(line_text) is not None
 
 
-def _replace_description_marker(description: str, legend_map: dict[str, str]) -> str | None:
+def _replace_description_marker(
+    description: str,
+    legends: list[tuple[str, str, float]],
+    entry: MelTableEntry,
+) -> str | None:
     normalized = normalize_text(description)
     if not normalized:
         return None
@@ -251,7 +258,15 @@ def _replace_description_marker(description: str, legend_map: dict[str, str]) ->
     marker = _normalize_marker_only(parts[0])
     if not marker:
         return None
-    legend = legend_map.get(marker)
+    marker_legends = [(text, y) for m, text, y in legends if m == marker]
+    if not marker_legends:
+        return None
+    # Prefer nearest legend below this row; fallback to nearest absolute distance.
+    below = [(text, y) for text, y in marker_legends if y >= entry.y1 - 1.0]
+    if below:
+        legend = min(below, key=lambda item: item[1] - entry.y1)[0]
+    else:
+        legend = min(marker_legends, key=lambda item: abs(item[1] - entry.y1))[0]
     if not legend:
         return None
     # Always replace marker-prefixed description with full legend text only.
