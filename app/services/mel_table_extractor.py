@@ -104,6 +104,11 @@ def _extract_page_entries(page: fitz.Page, page_number: int) -> list[MelTableEnt
             continue
 
         line_text = _words_to_text(words)
+        if _is_footnote_legend_line(line_text):
+            if current and current.title:
+                entries.append(current)
+            current = None
+            continue
         if _is_table_header(line_text):
             continue
 
@@ -154,9 +159,8 @@ def _apply_footnote_legend(entries: list[MelTableEntry], lines: list[dict[str, o
         if not entry.description_parts:
             continue
         description = normalize_text(" ".join(entry.description_parts))
-        marker = _normalize_marker_only(description)
-        replacement = legend_map.get(marker) if marker else None
-        if replacement and marker:
+        replacement = _replace_description_marker(description, legend_map)
+        if replacement:
             entry.description_parts = [replacement]
 
 
@@ -169,16 +173,11 @@ def _footnote_legend_map(lines: list[dict[str, object]], geometry: TableGeometry
         words = line["words"]
         if not words:
             continue
-        first_x = min(float(word[0]) for word in words)
-        # Footnote legend lines are usually left-aligned under the table body.
-        if first_x > geometry.item_left + 24.0:
-            continue
         line_text = _words_to_text(words)
-        match = FOOTNOTE_LEGEND_RE.match(line_text)
+        match = _parse_footnote_legend(line_text)
         if not match:
             continue
-        marker = _normalize_marker_only(match.group("marker"))
-        text = normalize_text(match.group("text"))
+        marker, text = match
         if marker and text:
             legends[marker] = text
     return legends
@@ -187,6 +186,40 @@ def _footnote_legend_map(lines: list[dict[str, object]], geometry: TableGeometry
 def _normalize_marker_only(text: str) -> str | None:
     normalized = normalize_text(text)
     return normalized if re.fullmatch(r"[#*]+", normalized) else None
+
+
+def _parse_footnote_legend(line_text: str) -> tuple[str, str] | None:
+    match = FOOTNOTE_LEGEND_RE.match(normalize_text(line_text))
+    if not match:
+        return None
+    marker = _normalize_marker_only(match.group("marker"))
+    text = normalize_text(match.group("text"))
+    if not marker or not text:
+        return None
+    return marker, text
+
+
+def _is_footnote_legend_line(line_text: str) -> bool:
+    return _parse_footnote_legend(line_text) is not None
+
+
+def _replace_description_marker(description: str, legend_map: dict[str, str]) -> str | None:
+    normalized = normalize_text(description)
+    if not normalized:
+        return None
+    parts = normalized.split(" ", 1)
+    marker = _normalize_marker_only(parts[0])
+    if not marker:
+        return None
+    legend = legend_map.get(marker)
+    if not legend:
+        return None
+    # If row text is exactly marker, replace fully.
+    if len(parts) == 1:
+        return legend
+    # If marker leaked with partial words, replace marker prefix with full legend.
+    trailing = normalize_text(parts[1])
+    return f"{legend} {trailing}".strip()
 
 
 def _find_table_geometry(
