@@ -166,20 +166,60 @@ def _apply_footnote_legend(entries: list[MelTableEntry], lines: list[dict[str, o
 
 def _footnote_legend_map(lines: list[dict[str, object]], geometry: TableGeometry) -> dict[str, str]:
     legends: dict[str, str] = {}
-    for line in lines:
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         y0 = float(line["y0"])
         if y0 < geometry.top_y:
+            index += 1
             continue
         words = line["words"]
         if not words:
+            index += 1
             continue
         line_text = _words_to_text(words)
         match = _parse_footnote_legend(line_text)
         if not match:
+            index += 1
             continue
         marker, text = match
-        if marker and text:
-            legends[marker] = text
+        full_text_parts = [text]
+        marker_left = min(float(word[0]) for word in words)
+        marker_y1 = max(float(word[3]) for word in words)
+        index += 1
+        while index < len(lines):
+            next_line = lines[index]
+            next_words = next_line["words"]
+            if not next_words:
+                break
+            next_text = _words_to_text(next_words)
+            if _parse_footnote_legend(next_text):
+                break
+            if _is_table_header(next_text):
+                break
+            # Stop at clear new section/item lines.
+            if STOP_SECTION_RE.match(normalize_label(next_text)) is not None:
+                break
+            if any(
+                ITEM_LABEL_RE.fullmatch(normalize_label(str(word[4]).strip()))
+                for word in next_words
+            ):
+                break
+
+            next_left = min(float(word[0]) for word in next_words)
+            next_y0 = min(float(word[1]) for word in next_words)
+            # Continuation lines should stay near the marker and left aligned.
+            if abs(next_left - marker_left) > 42.0:
+                break
+            if next_y0 - marker_y1 > 24.0:
+                break
+            full_text_parts.append(next_text)
+            marker_y1 = max(float(word[3]) for word in next_words)
+            index += 1
+
+        if marker and full_text_parts:
+            legends[marker] = normalize_text(" ".join(full_text_parts))
+        continue
     return legends
 
 
@@ -214,12 +254,8 @@ def _replace_description_marker(description: str, legend_map: dict[str, str]) ->
     legend = legend_map.get(marker)
     if not legend:
         return None
-    # If row text is exactly marker, replace fully.
-    if len(parts) == 1:
-        return legend
-    # If marker leaked with partial words, replace marker prefix with full legend.
-    trailing = normalize_text(parts[1])
-    return f"{legend} {trailing}".strip()
+    # Always replace marker-prefixed description with full legend text only.
+    return legend
 
 
 def _find_table_geometry(
