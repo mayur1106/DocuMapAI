@@ -268,7 +268,7 @@ def extract_local_toc_rows(document: fitz.Document, toc_pages: list[int]) -> lis
 def find_eicas_reference_pages(document: fitz.Document) -> list[int]:
     """Find EICAS message pages that contain MEL item reference tables."""
 
-    pages: list[int] = []
+    pages: set[int] = set()
     for page_index, page in enumerate(document):
         text = page.get_text("text")
         upper_text = text.upper()
@@ -281,10 +281,28 @@ def find_eicas_reference_pages(document: fitz.Document) -> list[int]:
             if float(word[0]) >= 330
         ]
         if any(ITEM_LABEL_RE.fullmatch(code) for code in reference_codes):
-            pages.append(page_index)
+            pages.add(page_index)
 
-    pages.extend(_find_ocr_eicas_candidate_pages(document, pages))
-    return sorted(set(pages))
+    for page_index in _eicas_page_range(document) or []:
+        if page_index < 0 or page_index >= len(document):
+            continue
+        page = document[page_index]
+        text = page.get_text("text").upper()
+        if "EICAS MESSAGES" not in text:
+            continue
+        if _page_has_eicas_item_reference(page):
+            pages.add(page_index)
+
+    pages.update(_find_ocr_eicas_candidate_pages(document, sorted(pages)))
+    return sorted(pages)
+
+
+def _page_has_eicas_item_reference(page: fitz.Page) -> bool:
+    for line in _visual_word_lines(page.get_text("words")):
+        label, _anchor_word = _eicas_reference_label_from_line(line["words"])
+        if label is not None:
+            return True
+    return False
 
 
 def extract_eicas_reference_rows(document: fitz.Document, reference_pages: list[int]) -> list[ExistingTocRow]:

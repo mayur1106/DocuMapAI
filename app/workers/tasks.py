@@ -98,6 +98,7 @@ def generate_toc_task(document_id: str) -> dict:
 
         if global_toc_pages or local_toc_pages:
             append_stream(document_id, "mode_check: existing_toc_detected linking")
+            output_path = settings.output_dir / f"{document_id}_linked_toc.pdf"
             result = hyperlink_existing_toc(
                 record.original_path,
                 output_path,

@@ -16,6 +16,7 @@ from app.services.existing_toc_linker import (
     extract_existing_toc_rows,
     extract_reference_labels,
     find_existing_toc_pages,
+    find_local_toc_pages,
     infer_target_label,
     link_eicas_references,
     normalize_label,
@@ -181,6 +182,9 @@ def _build_section_toc_plans(
     headings: list[Heading],
     settings: Settings,
 ) -> list[SectionTocPlan]:
+    if find_local_toc_pages(document):
+        return []
+
     roots = _section_roots(document)
     if not roots:
         roots = _section_roots_from_global_toc(document, headings)
