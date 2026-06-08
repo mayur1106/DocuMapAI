@@ -14,9 +14,11 @@ from app.services.existing_toc_linker import (
     build_outline_title_index,
     build_page_label_index,
     extract_existing_toc_rows,
+    extract_reference_labels,
     find_existing_toc_pages,
     infer_target_label,
     link_eicas_references,
+    normalize_label,
     resolve_target_page,
 )
 
@@ -152,12 +154,12 @@ def write_pdf_with_section_tocs(
                     insertions=insertions,
                     settings=settings,
                 )
-        _link_global_toc_rows(document, global_rows, plans, insertions)
+        linked_global_row_count = _link_global_toc_rows(document, global_rows, plans, insertions)
         linked_eicas_rows, unresolved_eicas_rows = link_eicas_references(
             document,
             excluded_pages=inserted_page_indices,
         )
-        document.set_toc(_build_outline(document, source_toc, plans, insertions))
+        document.set_toc(_build_outline(document, source_toc, plans, insertions, global_rows))
 
         if output_pdf.exists():
             output_pdf.unlink()
@@ -168,7 +170,7 @@ def write_pdf_with_section_tocs(
         sections=sections,
         heading_count=sum(len(plan.headings) for plan in plans),
         inserted_page_count=sum(plan.inserted_page_count for plan in plans),
-        linked_global_rows=len(global_rows),
+        linked_global_rows=linked_global_row_count,
         linked_eicas_rows=len(linked_eicas_rows),
         unresolved_eicas_rows=len(unresolved_eicas_rows),
     )
@@ -180,6 +182,8 @@ def _build_section_toc_plans(
     settings: Settings,
 ) -> list[SectionTocPlan]:
     roots = _section_roots(document)
+    if not roots:
+        roots = _section_roots_from_global_toc(document, headings)
     if not roots:
         return []
 
@@ -277,6 +281,55 @@ def _section_roots(document: fitz.Document) -> list[dict[str, int | str]]:
         )
 
     return sorted(roots, key=lambda item: int(item["page"]))
+
+
+def _section_roots_from_global_toc(document: fitz.Document, headings: list[Heading]) -> list[dict[str, int | str]]:
+    """Derive ATA section roots when the source PDF has visible TOC pages but no outline."""
+
+    first_heading_page_by_chapter: dict[str, int] = {}
+    for heading in sorted(headings, key=lambda item: (item.page, item.y0 or 0.0, item.title)):
+        chapter = _heading_chapter(heading)
+        if chapter is None:
+            continue
+        first_heading_page_by_chapter.setdefault(chapter, heading.page)
+
+    if not first_heading_page_by_chapter:
+        return []
+
+    roots: list[dict[str, int | str]] = []
+    seen_chapters: set[str] = set()
+    for row in extract_existing_toc_rows(document, find_existing_toc_pages(document)):
+        chapter = _global_row_chapter(row)
+        if chapter is None:
+            continue
+        if chapter in seen_chapters:
+            continue
+        page = first_heading_page_by_chapter.get(chapter)
+        if page is None:
+            continue
+        seen_chapters.add(chapter)
+        roots.append(
+            {
+                "chapter": chapter,
+                "page": page,
+                "title": _section_title(document, page, f"777_{chapter}_{row.title}"),
+            }
+        )
+
+    return sorted(roots, key=lambda item: int(item["page"]))
+
+
+def _global_row_chapter(row: ExistingTocRow) -> str | None:
+    if row.chapter.isdigit():
+        return f"{int(row.chapter):02d}"
+
+    for label in extract_reference_labels(row.reference_text):
+        normalized = normalize_label(label)
+        match = re.match(r"^TOC\s+(?P<chapter>\d{2})-", normalized)
+        if match is not None:
+            return match.group("chapter")
+
+    return None
 
 
 def _section_chapter(document: fitz.Document, page_number: int, title: str) -> str | None:
@@ -457,23 +510,34 @@ def _link_global_toc_rows(
     rows: list[ExistingTocRow],
     plans: list[SectionTocPlan],
     insertions: list[tuple[int, int]],
-) -> None:
+) -> int:
+    plan_by_chapter = {plan.chapter: plan for plan in plans}
+    linked_count = 0
     for row in rows:
-        if row.target_page_number is None:
+        target_page_number = row.target_page_number
+        if target_page_number is None:
+            chapter = _global_row_chapter(row)
+            plan = plan_by_chapter.get(chapter or "")
+            if plan is not None:
+                target_page_number = plan.source_start_page
+        if target_page_number is None:
             continue
 
         source_page_number = row.page_number
         page = document[_final_original_page(source_page_number, insertions) - 1]
-        target_page_number = _section_toc_page_for_target(row.target_page_number, plans, insertions)
+        final_target_page_number = _section_toc_page_for_target(target_page_number, plans, insertions)
         _delete_overlapping_links(page, row.rect)
         page.insert_link(
             {
                 "kind": fitz.LINK_GOTO,
                 "from": row.rect,
-                "page": target_page_number - 1,
+                "page": final_target_page_number - 1,
                 "to": fitz.Point(0, 0),
             }
         )
+        linked_count += 1
+
+    return linked_count
 
 
 def _build_outline(
@@ -481,6 +545,7 @@ def _build_outline(
     source_toc: list[list],
     plans: list[SectionTocPlan],
     insertions: list[tuple[int, int]],
+    global_rows: list[ExistingTocRow] | None = None,
 ) -> list[list[int | str]]:
     plan_by_start_page = {plan.source_start_page: plan for plan in plans}
     outline: list[list[int | str]] = []
@@ -508,9 +573,42 @@ def _build_outline(
         outline.append([level, title, _final_original_page(page_number, insertions)])
 
     if not outline:
-        for plan in plans:
+        outline = _outline_from_global_rows(document, global_rows or [], plans, insertions)
+
+    return outline
+
+
+def _outline_from_global_rows(
+    document: fitz.Document,
+    global_rows: list[ExistingTocRow],
+    plans: list[SectionTocPlan],
+    insertions: list[tuple[int, int]],
+) -> list[list[int | str]]:
+    outline: list[list[int | str]] = []
+    plan_by_chapter = {plan.chapter: plan for plan in plans}
+    emitted_plans: set[str] = set()
+
+    for row in sorted(global_rows, key=lambda item: (item.page_index, item.rect.y0, item.rect.x0)):
+        chapter = _global_row_chapter(row)
+        plan = plan_by_chapter.get(chapter or "")
+        if plan is not None:
+            if plan.chapter in emitted_plans:
+                continue
+            emitted_plans.add(plan.chapter)
             outline.append([1, plan.title, _first_toc_final_page(plan, insertions)])
             outline.extend(_outline_entries_for_plan(plan, insertions))
+            continue
+
+        if row.target_page_number is None:
+            continue
+        final_page = _final_original_page(row.target_page_number, insertions)
+        outline.append([1, _source_outline_title(document, row.target_page_number, row.title), final_page])
+
+    for plan in plans:
+        if plan.chapter in emitted_plans:
+            continue
+        outline.append([1, plan.title, _first_toc_final_page(plan, insertions)])
+        outline.extend(_outline_entries_for_plan(plan, insertions))
 
     return outline
 
