@@ -76,6 +76,12 @@ class SectionTocResult:
         }
 
 
+@dataclass(frozen=True)
+class SignatureStamp:
+    rect: fitz.Rect
+    image: bytes
+
+
 def has_missing_section_toc_pattern(
     source_pdf: Path,
     headings: list[Heading],
@@ -84,6 +90,65 @@ def has_missing_section_toc_pattern(
     settings = settings or get_settings()
     with fitz.open(source_pdf) as document:
         return bool(_build_section_toc_plans(document, headings, settings))
+
+
+def _signature_stamp_from_document(document: fitz.Document) -> SignatureStamp | None:
+    candidate_pages = list(dict.fromkeys([*find_existing_toc_pages(document), *range(len(document))]))
+    for page_index in candidate_pages:
+        if page_index < 0 or page_index >= len(document):
+            continue
+        page = document[page_index]
+        rect = _signature_stamp_rect(page)
+        if rect is None:
+            continue
+        pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2), clip=rect, alpha=False)
+        return SignatureStamp(rect=rect, image=pixmap.tobytes("png"))
+    return None
+
+
+def _signature_stamp_rect(page: fitz.Page) -> fitz.Rect | None:
+    words = page.get_text("words")
+    if not words:
+        return None
+
+    width = page.rect.width
+    height = page.rect.height
+    keywords = {"SIGNATURE", "SIGNED", "DIGITALLY"}
+    keyword_words = [
+        word
+        for word in words
+        if (
+            float(word[0]) >= width * 0.52
+            and height * 0.45 <= float(word[1]) <= height - 70.0
+            and any(keyword in str(word[4]).strip().upper() for keyword in keywords)
+        )
+    ]
+    if not keyword_words:
+        return None
+
+    keyword_y0 = min(float(word[1]) for word in keyword_words)
+    keyword_y1 = max(float(word[3]) for word in keyword_words)
+    signature_words = [
+        word
+        for word in words
+        if (
+            float(word[0]) >= width * 0.50
+            and keyword_y0 - 55.0 <= float(word[1]) <= keyword_y1 + 75.0
+        )
+    ]
+    if not signature_words:
+        signature_words = keyword_words
+
+    rect = fitz.Rect(
+        min(float(word[0]) for word in signature_words) - 18.0,
+        min(float(word[1]) for word in signature_words) - 18.0,
+        max(float(word[2]) for word in signature_words) + 36.0,
+        max(float(word[3]) for word in signature_words) + 18.0,
+    )
+    rect &= page.rect
+    if rect.is_empty or rect.width < 40.0 or rect.height < 24.0:
+        return None
+    return rect
 
 
 def write_pdf_with_section_tocs(
@@ -103,6 +168,7 @@ def write_pdf_with_section_tocs(
     with fitz.open(source_pdf) as document:
         source_toc = document.get_toc()
         blank_template_page_index = _find_intentionally_blank_template_page(document)
+        signature_stamp = _signature_stamp_from_document(document)
         plans = _build_section_toc_plans(document, headings, settings)
         if not plans:
             raise ValueError("No ATA sections with MEL table rows were found for chapter TOC insertion.")
@@ -152,6 +218,7 @@ def write_pdf_with_section_tocs(
                     page_headings=page_headings,
                     page_offset=page_offset,
                     page_label=page_label,
+                    signature_stamp=signature_stamp,
                     insertions=insertions,
                     settings=settings,
                 )
@@ -387,10 +454,11 @@ def _draw_section_toc_page(
     page_headings: list[Heading],
     page_offset: int,
     page_label: str,
+    signature_stamp: SignatureStamp | None,
     insertions: list[tuple[int, int]],
     settings: Settings,
 ) -> None:
-    _prepare_section_toc_template(page, plan, page_label, settings)
+    _prepare_section_toc_template(page, plan, page_label, signature_stamp, settings)
 
     width = page.rect.width
     right_x = width - settings.toc_margin_x
@@ -445,6 +513,7 @@ def _prepare_section_toc_template(
     page: fitz.Page,
     plan: SectionTocPlan,
     page_label: str,
+    signature_stamp: SignatureStamp | None,
     settings: Settings,
 ) -> None:
     for link in list(page.get_links()):
@@ -456,19 +525,16 @@ def _prepare_section_toc_template(
         page.rect.width - 36.0,
         max(plan.body_start_y + 20.0, plan.footer_top_y - 4.0),
     )
-    footer_rect = fitz.Rect(
-        36.0,
-        max(0.0, plan.footer_top_y - 3.0),
-        page.rect.width - 36.0,
-        page.rect.height - 20.0,
-    )
+    footer_label_rect = _footer_page_label_rect(page, plan)
     page.add_redact_annot(body_rect, fill=(1, 1, 1))
-    page.add_redact_annot(footer_rect, fill=(1, 1, 1))
+    page.add_redact_annot(footer_label_rect, fill=(1, 1, 1))
     page.apply_redactions(
         images=fitz.PDF_REDACT_IMAGE_NONE,
         graphics=fitz.PDF_REDACT_LINE_ART_REMOVE_IF_COVERED,
         text=fitz.PDF_REDACT_TEXT_REMOVE,
     )
+    if signature_stamp is not None:
+        page.insert_image(signature_stamp.rect, stream=signature_stamp.image, overlay=True)
 
     footer_text = page_label
     footer_font_size = 10.0
@@ -479,6 +545,17 @@ def _prepare_section_toc_template(
         fontsize=footer_font_size,
         fontname=settings.toc_font,
         color=(0, 0, 0),
+    )
+
+
+def _footer_page_label_rect(page: fitz.Page, plan: SectionTocPlan) -> fitz.Rect:
+    label_width = min(160.0, max(90.0, page.rect.width * 0.24))
+    center_x = page.rect.width / 2.0
+    return fitz.Rect(
+        center_x - label_width / 2.0,
+        max(0.0, plan.footer_top_y - 3.0),
+        center_x + label_width / 2.0,
+        page.rect.height - 20.0,
     )
 
 
