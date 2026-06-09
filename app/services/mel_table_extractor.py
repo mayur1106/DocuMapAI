@@ -183,6 +183,14 @@ def _footnote_legend_occurrences(lines: list[dict[str, object]], geometry: Table
         line_text = _words_to_text(words)
         match = _parse_footnote_legend(line_text)
         if not match:
+            marker = _normalize_marker_only(line_text)
+            if marker:
+                next_text = _next_non_empty_line_text(lines, index + 1)
+                if next_text:
+                    legends.append((marker, normalize_text(next_text), float(y0)))
+                index += 1
+                continue
+        if not match:
             index += 1
             continue
         marker, text = match
@@ -226,6 +234,17 @@ def _footnote_legend_occurrences(lines: list[dict[str, object]], geometry: Table
     return legends
 
 
+def _next_non_empty_line_text(lines: list[dict[str, object]], start_index: int) -> str | None:
+    for index in range(start_index, len(lines)):
+        words = lines[index]["words"]
+        if not words:
+            continue
+        text = _words_to_text(words)
+        if text and not _is_table_header(text):
+            return text
+    return None
+
+
 def _normalize_marker_only(text: str) -> str | None:
     normalized = normalize_text(text)
     return normalized if re.fullmatch(r"[#*]+", normalized) else None
@@ -254,8 +273,7 @@ def _replace_description_marker(
     normalized = normalize_text(description)
     if not normalized:
         return None
-    parts = normalized.split(" ", 1)
-    marker = _normalize_marker_only(parts[0])
+    marker = _description_marker(normalized)
     if not marker:
         return None
     marker_legends = [(text, y) for m, text, y in legends if m == marker]
@@ -271,6 +289,14 @@ def _replace_description_marker(
         return None
     # Always replace marker-prefixed description with full legend text only.
     return legend
+
+
+def _description_marker(description: str) -> str | None:
+    for token in description.split():
+        marker = _normalize_marker_only(token)
+        if marker:
+            return marker
+    return None
 
 
 def _find_table_geometry(

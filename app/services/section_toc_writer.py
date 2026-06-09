@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import fitz
@@ -16,6 +16,7 @@ from app.services.existing_toc_linker import (
     extract_existing_toc_rows,
     extract_reference_labels,
     find_existing_toc_pages,
+    find_image_only_local_toc_pages,
     find_local_toc_pages,
     infer_target_label,
     link_eicas_references,
@@ -244,12 +245,94 @@ def write_pdf_with_section_tocs(
     )
 
 
+def replace_image_local_tocs(
+    source_pdf: Path,
+    output_pdf: Path,
+    headings: list[Heading],
+    settings: Settings | None = None,
+) -> SectionTocResult:
+    """Replace image/OCR-only chapter TOC pages in-place with linked generated TOCs."""
+
+    settings = settings or get_settings()
+    output_pdf.parent.mkdir(parents=True, exist_ok=True)
+
+    with fitz.open(source_pdf) as document:
+        source_toc = document.get_toc()
+        image_toc_pages = find_image_only_local_toc_pages(document)
+        if not image_toc_pages:
+            raise ValueError("No image-only chapter TOC pages were detected for replacement.")
+
+        signature_stamp = _signature_stamp_from_document(document)
+        plans = _build_section_toc_plans(document, headings, settings, allow_existing_local_tocs=True)
+        plans = _plans_with_existing_toc_pages(document, plans, image_toc_pages, settings)
+        if not plans:
+            raise ValueError("No replacement chapter TOC plans could be matched to existing TOC pages.")
+
+        global_rows = _resolve_global_toc_rows(document)
+        insertions: list[tuple[int, int]] = []
+        replaced_page_indices: list[int] = []
+        sections: list[dict] = []
+
+        for plan in plans:
+            replacement_pages = _replacement_page_numbers(plan)
+            toc_labels = [f"TOC {plan.chapter}-{page_offset + 1}" for page_offset in range(len(replacement_pages))]
+            sections.append(
+                {
+                    "title": plan.title,
+                    "chapter": plan.chapter,
+                    "source_start_page": plan.source_start_page,
+                    "source_end_page": plan.source_end_page,
+                    "toc_pages": replacement_pages,
+                    "toc_labels": toc_labels,
+                    "entry_count": len(plan.headings),
+                    "appended_blank_page": False,
+                }
+            )
+            for page_offset, page_number in enumerate(replacement_pages):
+                page_number = replacement_pages[page_offset]
+                replaced_page_indices.append(page_number - 1)
+                page_headings = plan.toc_pages[page_offset] if page_offset < len(plan.toc_pages) else []
+                _draw_section_toc_page(
+                    page=document[page_number - 1],
+                    plan=plan,
+                    page_headings=page_headings,
+                    page_offset=page_offset,
+                    page_label=toc_labels[page_offset],
+                    signature_stamp=signature_stamp,
+                    insertions=insertions,
+                    settings=settings,
+                )
+
+        linked_global_row_count = _link_global_toc_rows(document, global_rows, plans, insertions)
+        linked_eicas_rows, unresolved_eicas_rows = link_eicas_references(
+            document,
+            excluded_pages=replaced_page_indices,
+        )
+        document.set_toc(_build_outline(document, source_toc, plans, insertions, global_rows))
+
+        if output_pdf.exists():
+            output_pdf.unlink()
+        document.save(output_pdf, garbage=4, deflate=True)
+
+    return SectionTocResult(
+        output_path=output_pdf,
+        sections=sections,
+        heading_count=sum(len(plan.headings) for plan in plans),
+        inserted_page_count=0,
+        linked_global_rows=linked_global_row_count,
+        linked_eicas_rows=len(linked_eicas_rows),
+        unresolved_eicas_rows=len(unresolved_eicas_rows),
+    )
+
+
 def _build_section_toc_plans(
     document: fitz.Document,
     headings: list[Heading],
     settings: Settings,
+    *,
+    allow_existing_local_tocs: bool = False,
 ) -> list[SectionTocPlan]:
-    if find_local_toc_pages(document):
+    if not allow_existing_local_tocs and find_local_toc_pages(document):
         return []
 
     roots = _section_roots(document)
@@ -305,6 +388,68 @@ def _build_section_toc_plans(
             plan.append_blank_page = True
 
     return plans
+
+
+def _plans_with_existing_toc_pages(
+    document: fitz.Document,
+    plans: list[SectionTocPlan],
+    image_toc_pages: list[int],
+    settings: Settings,
+) -> list[SectionTocPlan]:
+    pages_by_chapter: dict[str, list[int]] = {}
+    for page_index in image_toc_pages:
+        chapter = _section_chapter(document, page_index + 1, "")
+        if chapter is None:
+            continue
+        pages_by_chapter.setdefault(chapter, []).append(page_index + 1)
+
+    replacement_plans: list[SectionTocPlan] = []
+    for plan in plans:
+        replacement_pages = sorted(pages_by_chapter.get(plan.chapter, []))
+        if not replacement_pages:
+            continue
+
+        template_page = document[replacement_pages[0] - 1]
+        toc_pages = _paginate_section_toc_entries(
+            plan.headings,
+            _body_start_y(template_page),
+            template_page.rect.height,
+            _footer_positions(template_page)[0],
+            settings,
+        )
+        toc_pages = toc_pages[: len(replacement_pages)]
+        if not toc_pages:
+            continue
+
+        replacement_plan = replace(
+            plan,
+            source_start_page=replacement_pages[0],
+            toc_pages=toc_pages,
+            append_blank_page=False,
+            body_start_y=_body_start_y(template_page),
+            footer_top_y=_footer_positions(template_page)[0],
+            footer_baseline_y=_footer_positions(template_page)[1],
+        )
+        setattr(replacement_plan, "_replacement_page_numbers", replacement_pages)
+        replacement_plans.append(replacement_plan)
+
+    replacement_plans = sorted(replacement_plans, key=lambda item: item.source_start_page)
+    adjusted_plans: list[SectionTocPlan] = []
+    for index, plan in enumerate(replacement_plans):
+        next_start = (
+            replacement_plans[index + 1].source_start_page
+            if index + 1 < len(replacement_plans)
+            else len(document) + 1
+        )
+        adjusted_plan = replace(plan, source_end_page=max(plan.source_start_page, next_start - 1))
+        setattr(adjusted_plan, "_replacement_page_numbers", _replacement_page_numbers(plan))
+        adjusted_plans.append(adjusted_plan)
+
+    return adjusted_plans
+
+
+def _replacement_page_numbers(plan: SectionTocPlan) -> list[int]:
+    return list(getattr(plan, "_replacement_page_numbers", []))
 
 
 def _find_intentionally_blank_template_page(document: fitz.Document) -> int | None:
@@ -631,6 +776,7 @@ def _build_outline(
     plan_by_start_page = {plan.source_start_page: plan for plan in plans}
     outline: list[list[int | str]] = []
     skip_nested_section_items = False
+    emitted_plans: set[str] = set()
 
     for level, title, page_number in source_toc:
         if page_number < 1:
@@ -644,6 +790,7 @@ def _build_outline(
                 continue
 
             first_toc_page = _first_toc_final_page(plan, insertions)
+            emitted_plans.add(plan.chapter)
             outline.append([1, plan.title, first_toc_page])
             outline.extend(_outline_entries_for_plan(plan, insertions))
             continue
@@ -655,6 +802,12 @@ def _build_outline(
 
     if not outline:
         outline = _outline_from_global_rows(document, global_rows or [], plans, insertions)
+    else:
+        for plan in plans:
+            if plan.chapter in emitted_plans:
+                continue
+            outline.append([1, plan.title, _first_toc_final_page(plan, insertions)])
+            outline.extend(_outline_entries_for_plan(plan, insertions))
 
     return outline
 

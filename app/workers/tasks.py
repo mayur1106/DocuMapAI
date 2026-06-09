@@ -7,6 +7,7 @@ from app.models import DocumentStatus, Heading
 from app.services.existing_toc_linker import (
     ExistingTocLinkResult,
     find_existing_toc_pages,
+    find_image_only_local_toc_pages,
     find_local_toc_pages,
     hyperlink_existing_toc,
 )
@@ -17,6 +18,7 @@ from app.services.pdf_writer import write_pdf_with_toc
 from app.services.process_logs import append_stream, unresolved_report_path, write_unresolved_report
 from app.services.section_toc_writer import (
     has_missing_section_toc_pattern,
+    replace_image_local_tocs,
     write_pdf_with_section_tocs,
 )
 from app.services.storage import get_document, log_activity, save_toc, update_document_status
@@ -95,6 +97,61 @@ def generate_toc_task(document_id: str) -> dict:
                     "mode": "inserted_section_tocs",
                     **result.to_dict(),
                 }
+
+        image_local_toc_pages = _image_only_local_toc_pages(record.original_path) if local_toc_pages else []
+        if image_local_toc_pages:
+            append_stream(
+                document_id,
+                f"mode_check: image_only_local_toc_detected pages={len(image_local_toc_pages)} replacing",
+            )
+            headings = headings if headings is not None else extract_mel_table_headings(record.original_path)
+            if not headings:
+                raise ValueError("Image-only TOC pages were detected, but no MEL table rows were found for rebuilding.")
+
+            output_path = settings.output_dir / f"{document_id}_rebuilt_toc.pdf"
+            result = replace_image_local_tocs(
+                record.original_path,
+                output_path,
+                headings,
+                settings,
+            )
+            toc_path = save_toc(document_id, headings, settings)
+            update_document_status(
+                document_id,
+                DocumentStatus.READY,
+                output_path=output_path,
+                toc_path=toc_path,
+                error=None,
+                settings=settings,
+            )
+            logger.info(
+                "Replaced image-only local TOCs for document %s with %d sections and %d entries",
+                document_id,
+                len(result.sections),
+                result.heading_count,
+            )
+            append_stream(
+                document_id,
+                f"completed_rebuilt_image_local_tocs sections={len(result.sections)} heading_count={result.heading_count}",
+            )
+            log_activity(
+                action="toc_processing_completed",
+                status="success",
+                message=f"Completed image-only TOC replacement for {record.original_filename}.",
+                document=record,
+                metadata={
+                    "mode": "rebuilt_image_local_tocs",
+                    "heading_count": result.heading_count,
+                    "replaced_toc_pages": [page + 1 for page in image_local_toc_pages],
+                },
+                settings=settings,
+            )
+            return {
+                "document_id": document_id,
+                "mode": "rebuilt_image_local_tocs",
+                "heading_count": len(headings),
+                **result.to_dict(),
+            }
 
         if global_toc_pages or local_toc_pages:
             append_stream(document_id, "mode_check: existing_toc_detected linking")
@@ -208,6 +265,11 @@ def generate_toc_task(document_id: str) -> dict:
 def _existing_toc_pages(pdf_path) -> tuple[list[int], list[int]]:
     with fitz.open(pdf_path) as document:
         return find_existing_toc_pages(document), find_local_toc_pages(document)
+
+
+def _image_only_local_toc_pages(pdf_path) -> list[int]:
+    with fitz.open(pdf_path) as document:
+        return find_image_only_local_toc_pages(document)
 
 
 def _headings_from_existing_toc(result: ExistingTocLinkResult) -> list[Heading]:

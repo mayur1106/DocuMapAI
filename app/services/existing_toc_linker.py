@@ -248,7 +248,26 @@ def find_local_toc_pages(document: fitz.Document) -> list[int]:
         if _ata_chapter(page_text) is None:
             continue
         candidates.append(page_index)
-    return candidates
+    candidates.extend(_find_sparse_local_toc_pages(document, candidates))
+    return sorted(set(candidates))
+
+
+def find_image_only_local_toc_pages(document: fitz.Document) -> list[int]:
+    """Find existing chapter TOC pages whose visible rows are not extractable text."""
+
+    pages: list[int] = []
+    for page_index in find_local_toc_pages(document):
+        page = document[page_index]
+        if not _looks_like_sparse_local_toc_page(page):
+            continue
+        rows = _extract_local_rows_from_words(
+            page=page,
+            page_index=page_index,
+            page_words=page.get_text("words"),
+        )
+        if not rows:
+            pages.append(page_index)
+    return pages
 
 
 def extract_existing_toc_rows(document: fitz.Document, toc_pages: list[int]) -> list[ExistingTocRow]:
@@ -489,10 +508,32 @@ def _extract_rows_from_page(page: fitz.Page, page_index: int) -> list[ExistingTo
 
 
 def _extract_local_rows_from_page(page: fitz.Page, page_index: int) -> list[ExistingTocRow]:
+    rows = _extract_local_rows_from_words(
+        page=page,
+        page_index=page_index,
+        page_words=page.get_text("words"),
+    )
+    if rows or not _local_page_needs_ocr(page):
+        return rows
+
+    try:
+        ocr_words = _ocr_page_words(page)
+    except RuntimeError:
+        return rows
+
+    return _extract_local_rows_from_words(page=page, page_index=page_index, page_words=ocr_words)
+
+
+def _extract_local_rows_from_words(
+    *,
+    page: fitz.Page,
+    page_index: int,
+    page_words: list[tuple],
+) -> list[ExistingTocRow]:
     rows: list[ExistingTocRow] = []
     current: ExistingTocRow | None = None
 
-    for line in _word_lines(page):
+    for line in _visual_word_lines(page_words):
         y0 = float(line["y0"])
         y1 = float(line["y1"])
         words = line["words"]
@@ -659,6 +700,77 @@ def _find_ocr_eicas_candidate_pages(document: fitz.Document, detected_pages: lis
     return candidates
 
 
+def _find_sparse_local_toc_pages(document: fitz.Document, detected_pages: list[int]) -> list[int]:
+    expected_counts = _expected_local_toc_counts(document)
+    if not expected_counts:
+        return []
+
+    detected = set(detected_pages)
+    page_signals = [
+        (
+            _ata_chapter(page.get_text("text")),
+            _looks_like_sparse_local_toc_page(page),
+        )
+        for page in document
+    ]
+    candidates: list[int] = []
+    for chapter, expected_count in expected_counts.items():
+        chapter_pages: list[int] = []
+        started = False
+        for page_index, (page_chapter, is_sparse_toc) in enumerate(page_signals):
+            if page_chapter != chapter:
+                if started:
+                    break
+                continue
+
+            started = True
+            if page_index in detected:
+                chapter_pages.append(page_index)
+                continue
+            if is_sparse_toc:
+                chapter_pages.append(page_index)
+                if len(chapter_pages) >= expected_count:
+                    break
+                continue
+            break
+
+        candidates.extend(chapter_pages[:expected_count])
+    return candidates
+
+
+def _expected_local_toc_counts(document: fitz.Document) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for page_index in find_existing_toc_pages(document):
+        reference = _normalize_reference_text(document[page_index].get_text("text"))
+        range_matches = list(
+            re.finditer(
+                r"\bTOC\s+(\d{2})-(\d+)(?:\s+(?:TO|-)\s+(?:TOC\s+)?\1-(\d+))?",
+                reference,
+            )
+        )
+        for match in range_matches:
+            chapter = match.group(1)
+            page_number = int(match.group(3) or match.group(2))
+            counts[chapter] = max(counts.get(chapter, 0), page_number)
+    return counts
+
+
+def _looks_like_sparse_local_toc_page(page: fitz.Page) -> bool:
+    text = page.get_text("text")
+    if _ata_chapter(text) is None:
+        return False
+    if len(text.split()) > 45:
+        return False
+    upper_text = text.upper()
+    return "MINIMUM EQUIPMENT LIST" in upper_text and "DISPATCH DEVIATION GUIDE" in upper_text
+
+
+def _local_page_needs_ocr(page: fitz.Page) -> bool:
+    if not _looks_like_sparse_local_toc_page(page):
+        return False
+    return len(_extract_local_rows_from_words(page=page, page_index=page.number, page_words=page.get_text("words"))) == 0
+
+
 def _eicas_page_range(document: fitz.Document) -> range | None:
     em_pages: list[int] = []
     for page_index, page in enumerate(document):
@@ -723,7 +835,7 @@ def _ocr_page_words(page: fitz.Page) -> list[tuple]:
         )
     except RuntimeError as exc:
         raise RuntimeError(
-            "OCR is required for an image-based EICAS page, but Tesseract OCR is not available. "
+            "OCR is required for an image-based TOC or EICAS page, but Tesseract OCR is not available. "
             "Install Tesseract OCR and ensure tesseract.exe is on PATH, or set TESSDATA_DIR to the tessdata folder."
         ) from exc
 
